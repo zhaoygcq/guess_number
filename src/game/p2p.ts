@@ -15,6 +15,12 @@ export interface GameConfigPayload {
   allowDuplicates: boolean;
   matchStrategy: MatchStrategy;
   secret: string; 
+  turnOrder?: string[];
+  currentTurn?: string;
+}
+
+export interface TurnChangePayload {
+  currentTurn: string;
 }
 
 export interface DuelInitPayload {
@@ -188,6 +194,19 @@ export class P2PManager {
                 conn.send(msg);
             }
         });
+    }
+  }
+
+  public kick(peerId: string) {
+    const conn = this.conns.get(peerId);
+    if (conn) {
+        conn.send({ type: P2P_MESSAGE_TYPE.KICK, payload: { message: "你已被房主移出房间" } });
+        // Close after a short delay to ensure message is sent
+        setTimeout(() => {
+            conn.close();
+            this.conns.delete(peerId);
+            if (this.onDisconnectCallback) this.onDisconnectCallback(peerId);
+        }, 500);
     }
   }
 

@@ -32,22 +32,38 @@ type GameViewProps = {
   activeIndex: number;
   setActiveIndex: (index: number) => void;
   username: string;
+  targetPeerId?: string | null;
+  currentTurn?: string | null;
+  turnOrder?: string[];
+  myId?: string;
 };
 
 export const GameView = ({
   setView, setStatus, digits, mode, playStyle, matchStrategy, status,
   opponents, history, scrollRef, mySecret, gameEngine, guess, error,
   handleVirtualKeyPress, handleVirtualDelete, handleSubmit, startSingleGame, startHostGame,
-  activeIndex, setActiveIndex, username
+  activeIndex, setActiveIndex, username, targetPeerId, currentTurn, myId
 }: GameViewProps) => {
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(true);
 
+  const isMyTurn = mode === GAME_MODE.SINGLE || !currentTurn || currentTurn === myId;
+  const isRaceMode = mode !== GAME_MODE.SINGLE && playStyle === PLAY_STYLE.RACE;
+  
   // Auto-open keyboard when game starts or status changes to input-ready states
   useEffect(() => {
-    if (status === GAME_STATUS.PLAYING || status === GAME_STATUS.SETTING_SECRET) {
+    if ((status === GAME_STATUS.PLAYING && isMyTurn) || status === GAME_STATUS.SETTING_SECRET) {
        setIsKeyboardOpen(true);
+    } else {
+       setIsKeyboardOpen(false);
     }
-  }, [status]);
+  }, [status, isMyTurn]);
+
+  // Find current turn username
+  const getCurrentTurnUsername = () => {
+      if (!currentTurn) return "";
+      if (currentTurn === myId) return "我";
+      return opponents?.get(currentTurn)?.username || "对手";
+  };
 
   return (
     <div className="max-w-lg mx-auto w-full h-full flex flex-col gap-2 animate-in fade-in duration-500 pb-safe relative">
@@ -72,7 +88,21 @@ export const GameView = ({
                         {playStyle === PLAY_STYLE.DUEL ? "对决" : "竞速"}
                     </span>
                 )}
+                {mode !== GAME_MODE.SINGLE && status === GAME_STATUS.PLAYING && (
+                    <span className="text-slate-500 text-xs border border-slate-700 rounded px-1.5 py-0.5">
+                        {playStyle === PLAY_STYLE.RACE ? "猜系统" : `猜 ${(targetPeerId && opponents?.get(targetPeerId)?.username) || "对手"}`}
+                    </span>
+                )}
             </div>
+            {/* Turn Indicator */}
+            {isRaceMode && status === GAME_STATUS.PLAYING && (
+                <div className="text-xs font-mono mt-1 flex items-center gap-1">
+                   <span className="text-slate-500">当前回合:</span>
+                   <span className={cn("font-bold", isMyTurn ? "text-emerald-400" : "text-amber-400 animate-pulse")}>
+                       {getCurrentTurnUsername()}
+                   </span>
+                </div>
+            )}
             {mode !== GAME_MODE.SINGLE && mySecret && status === GAME_STATUS.PLAYING && (
                 <div className="text-xs text-amber-500/80 font-mono mt-1">
                    我出的题: <span className="font-bold">{mySecret}</span>
@@ -85,14 +115,24 @@ export const GameView = ({
       {mode !== GAME_MODE.SINGLE && status === GAME_STATUS.PLAYING && opponents && opponents.size > 0 && (
         <div className="flex flex-col gap-2 shrink-0">
            {Array.from(opponents.entries()).map(([id, status]) => (
-                <div key={id} className="flex items-center justify-between bg-slate-800/40 p-3 rounded-xl border border-slate-700/50">
+                <div key={id} className={cn(
+                    "flex items-center justify-between bg-slate-800/40 p-3 rounded-xl border transition-all duration-300",
+                    isRaceMode && currentTurn === id ? "border-amber-500/50 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]" : "border-slate-700/50"
+                )}>
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
-                            <Users className="w-4 h-4 text-slate-400"/>
+                        <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+                            isRaceMode && currentTurn === id ? "bg-amber-500/20 text-amber-400" : "bg-slate-700 text-slate-400"
+                        )}>
+                            <Users className="w-4 h-4"/>
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-xs font-bold text-slate-400">
+                            <span className={cn(
+                                "text-xs font-bold",
+                                isRaceMode && currentTurn === id ? "text-amber-400" : "text-slate-400"
+                            )}>
                                 {status.username || `对手 (${id.substring(0, 4)})`}
+                                {isRaceMode && currentTurn === id && <span className="ml-1 text-[10px] bg-amber-500/20 px-1 rounded">Thinking...</span>}
                             </span>
                             <span className="text-sm font-mono text-slate-200">已猜 {status.guessCount} 次</span>
                         </div>
@@ -144,6 +184,23 @@ export const GameView = ({
 
       {/* Input Display Area */}
       <div className="shrink-0 pt-2 pb-2 flex flex-col items-center relative">
+         
+         {/* Not My Turn Overlay */}
+         {isRaceMode && status === GAME_STATUS.PLAYING && !isMyTurn && (
+             <div className="absolute inset-0 z-10 bg-slate-950/80 backdrop-blur-[2px] flex items-center justify-center rounded-2xl animate-in fade-in">
+                 <div className="flex flex-col items-center gap-2">
+                     <div className="flex gap-1">
+                         <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                         <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                         <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce"></span>
+                     </div>
+                     <p className="text-sm font-medium text-amber-400">
+                         等待 <span className="font-bold underline">{getCurrentTurnUsername()}</span> 行动...
+                     </p>
+                 </div>
+             </div>
+         )}
+
          {/* Setting Secret Overlay - Waiting State Only */}
          {status === GAME_STATUS.SETTING_SECRET && mySecret && (
             <div className="absolute inset-0 z-20 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center rounded-2xl animate-in fade-in">

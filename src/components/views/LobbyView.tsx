@@ -1,4 +1,4 @@
-import { Settings, Copy, CheckCircle2, Users } from "lucide-react";
+import { Settings, Copy, CheckCircle2, Users, X } from "lucide-react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
@@ -24,12 +24,13 @@ type LobbyViewProps = {
   startSingleGame: () => void;
   startHostGame: () => void;
   username: string;
+  kickPlayer?: (peerId: string) => void;
 };
 
 export const LobbyView = ({
   mode, setView, setP2P, myId, opponents, copyId,
   digits, setDigits, playStyle, setPlayStyle, matchStrategy, setMatchStrategy,
-  startSingleGame, startHostGame, username
+  startSingleGame, startHostGame, username, kickPlayer
 }: LobbyViewProps) => {
   const connectedCount = opponents ? opponents.size : 0;
 
@@ -72,17 +73,29 @@ export const LobbyView = ({
                     </p>
                     <div className="flex flex-col gap-2">
                         {Array.from(opponents?.entries() || []).map(([id, info]) => (
-                            <div key={id} className="flex items-center justify-between bg-black/20 p-2 rounded-lg">
-                                <Tooltip content={info.username || "未知用户"}>
-                                    <Badge color="green" className="font-mono text-[10px] px-1 py-0 h-5 max-w-[100px] truncate block">
-                                        {info.username || id.substring(0, 4)}
-                                    </Badge>
-                                </Tooltip>
-                                <Tooltip content={id}>
-                                    <span className="text-[10px] text-slate-500 font-mono">
-                                        {id.substring(0, 4)}...
-                                    </span>
-                                </Tooltip>
+                            <div key={id} className="flex items-center justify-between bg-black/20 p-2 rounded-lg group relative">
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                    <Tooltip content={info.username || "未知用户"}>
+                                        <Badge color="green" className="font-mono text-[10px] px-1 py-0 h-5 max-w-[80px] truncate block">
+                                            {info.username || id.substring(0, 4)}
+                                        </Badge>
+                                    </Tooltip>
+                                    <Tooltip content={id}>
+                                        <span className="text-[10px] text-slate-500 font-mono truncate">
+                                            {id.substring(0, 4)}...
+                                        </span>
+                                    </Tooltip>
+                                </div>
+                                
+                                {mode === GAME_MODE.MULTI_HOST && kickPlayer && (
+                                    <button 
+                                        onClick={() => kickPlayer(id)}
+                                        className="text-slate-500 hover:text-red-400 p-1 rounded transition-colors"
+                                        title="踢出玩家"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </div>

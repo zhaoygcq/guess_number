@@ -38,6 +38,8 @@ export const P2P_MESSAGE_TYPE = {
   RESTART_ACCEPT: "RESTART_ACCEPT",
   PLAYER_INFO: "PLAYER_INFO",
   ERROR: "ERROR",
+  KICK: "KICK",
+  TURN_CHANGE: "TURN_CHANGE",
 } as const;
 
 export const MAX_PLAYERS = 5;

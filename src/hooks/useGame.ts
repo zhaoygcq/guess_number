@@ -34,6 +34,16 @@ export function useGame() {
   const [peerIdInput, setPeerIdInput] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   
+  // Refs for callbacks to access fresh state
+  const modeRef = useRef(mode);
+  const viewRef = useRef(view);
+  const isKickedRef = useRef(false);
+
+  useEffect(() => {
+      modeRef.current = mode;
+      viewRef.current = view;
+  }, [mode, view]);
+
   // Opponent State (Map of PeerID -> State)
   const [opponents, setOpponents] = useState<Map<string, {
     username?: string;
@@ -41,6 +51,10 @@ export function useGame() {
     lastResult: { exact: number; total: number } | null;
   }>>(new Map());
   
+  // Turn State
+  const [turnOrder, setTurnOrder] = useState<string[]>([]);
+  const [currentTurn, setCurrentTurn] = useState<string | null>(null);
+
   // Duel State
   const [mySecret, setMySecret] = useState("");
   const [opponentSecret, setOpponentSecret] = useState<string | null>(null);
@@ -123,10 +137,16 @@ export function useGame() {
           return next;
       });
       
-      if (mode === GAME_MODE.MULTI_JOIN) {
-          // If we are a client and disconnected from Host (usually only 1 connection), then reset
-          // But if P2PManager manages multiple, we need to know if this was THE host.
-          // For now, simple assumption: Client has only 1 connection.
+      if (modeRef.current === GAME_MODE.MULTI_JOIN) {
+          // If we are a client and disconnected from Host
+          // Check if we were kicked first
+          if (isKickedRef.current) {
+              // We were kicked, so the KICK message handler will handle the UI reset.
+              // Just reset the flag for next time (though we are leaving anyway)
+              isKickedRef.current = false;
+              return;
+          }
+
           setIsConnected(false);
           setError("对方已断开连接");
           setMode(GAME_MODE.SINGLE);
@@ -151,7 +171,19 @@ export function useGame() {
         case P2P_MESSAGE_TYPE.GUESS_UPDATE:
           const update = msg.payload as GuessUpdatePayload;
           setOpponents(prev => new Map(prev).set(peerId, update));
+          
+          // If we are Host, we check if we need to advance the turn
+          if (modeRef.current === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
+              // Wait a bit to ensure UI updates, then advance
+              // Actually, we can advance immediately. 
+              // The rule: "Must wait for everyone to guess... before next round"
+              // implies round-robin.
+              advanceTurnRef();
+          }
           break;
+        case P2P_MESSAGE_TYPE.TURN_CHANGE:
+           setCurrentTurn(msg.payload.currentTurn);
+           break;
         case P2P_MESSAGE_TYPE.PLAYER_INFO:
           const info = msg.payload as PlayerInfoPayload;
           console.log(`[P2P] Received username from ${peerId}: ${info.username}`);
@@ -162,14 +194,22 @@ export function useGame() {
             return next;
           });
           break;
+        case P2P_MESSAGE_TYPE.KICK:
+          isKickedRef.current = true;
+          setError(msg.payload.message);
+          setIsConnected(false);
+          // Force exit after delay
+          setTimeout(() => {
+               setView(VIEW.HOME);
+               setMode(GAME_MODE.SINGLE);
+               setP2P(null);
+               isKickedRef.current = false; // Reset
+          }, 2000);
+          break;
         case P2P_MESSAGE_TYPE.ERROR:
           setError(msg.payload.message);
           setIsConnected(false);
-          // Don't change view here, let the user see the error in current view or redirect if needed
-          // But if we are in lobby and get error, maybe we should be kicked out?
-          // For join process, error handling is in handleJoin's catch block (which won't catch this async message).
-          // So if we are "connected" but then receive ERROR (like Room Full), we need to handle it.
-          if (view === VIEW.LOBBY && mode === GAME_MODE.MULTI_JOIN) {
+          if (viewRef.current === VIEW.LOBBY && modeRef.current === GAME_MODE.MULTI_JOIN) {
                // Kick out to home
                setTimeout(() => {
                    setView(VIEW.HOME);
@@ -195,6 +235,12 @@ export function useGame() {
     setPlayStyle(PLAY_STYLE.RACE);
     setMatchStrategy(config.matchStrategy);
     
+    // Turn management
+    if (config.turnOrder && config.currentTurn) {
+        setTurnOrder(config.turnOrder);
+        setCurrentTurn(config.currentTurn);
+    }
+
     const engine = new GameEngine({ digits: config.digits, allowDuplicates: true });
     // @ts-ignore
     engine["secret"] = config.secret; 
@@ -279,7 +325,24 @@ export function useGame() {
         setGameEngine(engine);
         resetGameState();
         const secret = engine.getSecret();
-        p2p.send({ type: P2P_MESSAGE_TYPE.GAME_START, payload: { digits: d, allowDuplicates: true, matchStrategy, secret } });
+        
+        // Setup turn order
+        const order = [myId, ...Array.from(opponents.keys())];
+        // Sort to ensure consistency? Or just use this order (Host first, then connect order)
+        setTurnOrder(order);
+        setCurrentTurn(order[0]);
+        
+        p2p.send({ 
+            type: P2P_MESSAGE_TYPE.GAME_START, 
+            payload: { 
+                digits: d, 
+                allowDuplicates: true, 
+                matchStrategy, 
+                secret,
+                turnOrder: order,
+                currentTurn: order[0]
+            } 
+        });
     } else {
         setStatus(GAME_STATUS.SETTING_SECRET);
         setMySecret("");
@@ -287,6 +350,34 @@ export function useGame() {
         p2p.send({ type: P2P_MESSAGE_TYPE.DUEL_INIT, payload: { digits: d, allowDuplicates: true, matchStrategy } });
     }
     setView(VIEW.GAME);
+  };
+
+  // Refs for Game Logic
+  const turnOrderRef = useRef<string[]>([]);
+  const currentTurnRef = useRef<string | null>(null);
+
+  useEffect(() => {
+      turnOrderRef.current = turnOrder;
+      currentTurnRef.current = currentTurn;
+  }, [turnOrder, currentTurn]);
+
+  const advanceTurnRef = () => {
+      if (!p2p) return;
+      const order = turnOrderRef.current;
+      const current = currentTurnRef.current;
+      if (!order.length || !current) return;
+
+      const idx = order.indexOf(current);
+      if (idx === -1) return;
+
+      const nextIdx = (idx + 1) % order.length;
+      const nextPlayer = order[nextIdx];
+      
+      // Update local state
+      setCurrentTurn(nextPlayer); // Triggers useEffect -> updates Ref
+      
+      // Broadcast
+      p2p.send({ type: P2P_MESSAGE_TYPE.TURN_CHANGE, payload: { currentTurn: nextPlayer } });
   };
 
   const handleJoin = async () => {
@@ -386,12 +477,23 @@ export function useGame() {
              if (mode !== GAME_MODE.SINGLE && p2p) {
                 p2p.send({ type: P2P_MESSAGE_TYPE.GAME_OVER });
              }
+          } else {
+             // If not won, check if we need to advance turn (if we are Host and it's our turn)
+             // But wait, the advanceTurnRef logic is triggered by GUESS_UPDATE.
+             // If I am Host, I just updated my local state. I should also trigger advanceTurnRef.
+             if (mode === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
+                 advanceTurnRef();
+             }
           }
       } else {
           if (result.exact === digits) {
              setStatus(GAME_STATUS.WON);
              if (mode !== GAME_MODE.SINGLE && p2p) {
                 p2p.send({ type: P2P_MESSAGE_TYPE.GAME_OVER });
+             }
+          } else {
+             if (mode === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
+                 advanceTurnRef();
              }
           }
       }
@@ -438,6 +540,12 @@ export function useGame() {
     setTimeout(() => setError(null), 2000);
   };
 
+  const kickPlayer = (peerId: string) => {
+    if (p2p && mode === GAME_MODE.MULTI_HOST) {
+        p2p.kick(peerId);
+    }
+  };
+
   return {
     digits, setDigits,
     allowDuplicates,
@@ -469,6 +577,9 @@ export function useGame() {
     copyId,
     handleSubmit,
     handleVirtualKeyPress,
-    handleVirtualDelete
+    handleVirtualDelete,
+    kickPlayer,
+    currentTurn,
+    turnOrder
   };
 }
