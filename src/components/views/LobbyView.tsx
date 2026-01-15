@@ -2,8 +2,10 @@ import { Settings, Copy, CheckCircle2, Users } from "lucide-react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
+import { Tooltip } from "../ui/Tooltip";
 import { cn } from "../../utils/cn";
 import { GameMode, PlayStyle, MatchStrategy } from "../../types";
+import { GAME_MODE, PLAY_STYLE, MATCH_STRATEGY, VIEW } from "../../constants";
 
 type LobbyViewProps = {
   mode: GameMode;
@@ -11,7 +13,7 @@ type LobbyViewProps = {
   setP2P: (val: any) => void;
   p2p: any;
   myId: string;
-  isConnected: boolean;
+  opponents?: Map<string, any>;
   copyId: () => void;
   digits: number;
   setDigits: (val: number) => void;
@@ -21,21 +23,24 @@ type LobbyViewProps = {
   setMatchStrategy: (val: MatchStrategy) => void;
   startSingleGame: () => void;
   startHostGame: () => void;
+  username: string;
 };
 
 export const LobbyView = ({
-  mode, setView, setP2P, p2p, myId, isConnected, copyId,
+  mode, setView, setP2P, myId, opponents, copyId,
   digits, setDigits, playStyle, setPlayStyle, matchStrategy, setMatchStrategy,
-  startSingleGame, startHostGame
+  startSingleGame, startHostGame, username
 }: LobbyViewProps) => {
+  const connectedCount = opponents ? opponents.size : 0;
+
   return (
     <div className="max-w-md mx-auto w-full h-full flex flex-col gap-6 animate-in slide-in-from-right-4 duration-300">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => { setView("home"); p2p?.destroy(); setP2P(null); }} className="px-0">
+        <Button variant="ghost" onClick={() => { setView(VIEW.HOME); setP2P(null); }} className="px-0">
            ← 返回
         </Button>
-        <Badge color={mode === "single" ? "blue" : "green"}>
-           {mode === "single" ? "单机" : mode === "multi_host" ? "房主" : "访客"}
+        <Badge color={mode === GAME_MODE.SINGLE ? "blue" : "green"}>
+           {mode === GAME_MODE.SINGLE ? "单机" : mode === GAME_MODE.MULTI_HOST ? "房主" : "访客"}
         </Badge>
       </div>
 
@@ -47,26 +52,55 @@ export const LobbyView = ({
           </div>
 
           {/* Room ID Info */}
-          {mode === "multi_host" && (
+          {mode === GAME_MODE.MULTI_HOST && (
             <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-2">
               <label className="text-xs font-semibold uppercase text-slate-500">房间 ID</label>
               <div className="flex gap-2">
-                <code className="flex-1 bg-black/20 p-2 rounded text-emerald-400 font-mono text-center select-all truncate">
-                  {myId || "生成中..."}
-                </code>
+                <Tooltip content={myId} className="flex-1 min-w-0">
+                    <code className="w-full block bg-black/20 p-2 rounded text-emerald-400 font-mono text-center select-all truncate">
+                    {myId || "生成中..."}
+                    </code>
+                </Tooltip>
                 <Button variant="secondary" onClick={copyId} icon={Copy} className="px-3 shrink-0">
                   复制
                 </Button>
               </div>
-              {isConnected && <p className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> 好友已连接</p>}
-              {!isConnected && <p className="text-xs text-amber-400 flex items-center gap-1 animate-pulse"><Users className="w-3 h-3"/> 等待连接...</p>}
+              {connectedCount > 0 ? (
+                 <div className="space-y-1 mt-2">
+                    <p className="text-xs text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3"/> {connectedCount} 位玩家已连接
+                    </p>
+                    <div className="flex flex-col gap-2">
+                        {Array.from(opponents?.entries() || []).map(([id, info]) => (
+                            <div key={id} className="flex items-center justify-between bg-black/20 p-2 rounded-lg">
+                                <Tooltip content={info.username || "未知用户"}>
+                                    <Badge color="green" className="font-mono text-[10px] px-1 py-0 h-5 max-w-[100px] truncate block">
+                                        {info.username || id.substring(0, 4)}
+                                    </Badge>
+                                </Tooltip>
+                                <Tooltip content={id}>
+                                    <span className="text-[10px] text-slate-500 font-mono">
+                                        {id.substring(0, 4)}...
+                                    </span>
+                                </Tooltip>
+                            </div>
+                        ))}
+                    </div>
+                 </div>
+              ) : (
+                 <p className="text-xs text-amber-400 flex items-center gap-1 animate-pulse"><Users className="w-3 h-3"/> 等待连接...</p>
+              )}
             </div>
           )}
 
-          {mode === "multi_join" && (
+          {mode === GAME_MODE.MULTI_JOIN && (
              <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 text-center">
                 <p className="text-slate-400 text-sm">已连接到房间</p>
-                <p className="text-xs text-slate-500 mt-1">等待房主开始游戏...</p>
+                <div className="mt-2 flex items-center justify-center gap-2">
+                    <span className="text-xs text-slate-500">我是</span>
+                    <Badge color="blue" className="font-mono">{username}</Badge>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">等待房主开始游戏...</p>
              </div>
           )}
 
@@ -74,9 +108,9 @@ export const LobbyView = ({
              <div className="space-y-2">
                <label className="text-xs font-semibold text-slate-500">数字位数</label>
                <div className="flex items-center gap-2 bg-slate-950 rounded-lg p-1 border border-slate-800 h-[42px]">
-                  <button onClick={() => setDigits(Math.max(3, digits-1))} disabled={mode === "multi_join" || digits <= 3} className="w-10 h-full flex items-center justify-center hover:bg-slate-800 rounded disabled:opacity-30 active:bg-slate-700">-</button>
+                  <button onClick={() => setDigits(Math.max(3, digits-1))} disabled={mode === GAME_MODE.MULTI_JOIN || digits <= 3} className="w-10 h-full flex items-center justify-center hover:bg-slate-800 rounded disabled:opacity-30 active:bg-slate-700">-</button>
                   <span className="flex-1 text-center font-mono font-bold text-lg">{digits}</span>
-                  <button onClick={() => setDigits(Math.min(10, digits+1))} disabled={mode === "multi_join" || digits >= 10} className="w-10 h-full flex items-center justify-center hover:bg-slate-800 rounded disabled:opacity-30 active:bg-slate-700">+</button>
+                  <button onClick={() => setDigits(Math.min(10, digits+1))} disabled={mode === GAME_MODE.MULTI_JOIN || digits >= 10} className="w-10 h-full flex items-center justify-center hover:bg-slate-800 rounded disabled:opacity-30 active:bg-slate-700">+</button>
                </div>
              </div>
              
@@ -84,21 +118,21 @@ export const LobbyView = ({
                <label className="text-xs font-semibold text-slate-500">匹配策略</label>
                <div className="grid grid-cols-2 gap-2">
                    <button 
-                      onClick={() => setMatchStrategy("exact")}
-                      disabled={mode === "multi_join"}
+                      onClick={() => setMatchStrategy(MATCH_STRATEGY.EXACT)}
+                      disabled={mode === GAME_MODE.MULTI_JOIN}
                       className={cn(
                         "p-2 rounded-lg border text-sm transition-all h-[42px]", 
-                        matchStrategy === "exact" ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500"
+                        matchStrategy === MATCH_STRATEGY.EXACT ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500"
                       )}
                    >
                       全匹配
                    </button>
                    <button 
-                      onClick={() => setMatchStrategy("value")}
-                      disabled={mode === "multi_join"}
+                      onClick={() => setMatchStrategy(MATCH_STRATEGY.VALUE)}
+                      disabled={mode === GAME_MODE.MULTI_JOIN}
                       className={cn(
                         "p-2 rounded-lg border text-sm transition-all h-[42px]", 
-                        matchStrategy === "value" ? "bg-purple-500/20 border-purple-500 text-purple-400" : "bg-slate-950 border-slate-800 text-slate-500"
+                        matchStrategy === MATCH_STRATEGY.VALUE ? "bg-purple-500/20 border-purple-500 text-purple-400" : "bg-slate-950 border-slate-800 text-slate-500"
                       )}
                    >
                       数匹配
@@ -107,19 +141,19 @@ export const LobbyView = ({
              </div>
           </div>
 
-          {mode === "multi_host" && (
+          {mode === GAME_MODE.MULTI_HOST && (
              <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-500">出题模式</label>
                 <div className="grid grid-cols-2 gap-2">
                    <button 
-                      onClick={() => setPlayStyle("race")}
-                      className={cn("p-2 rounded-lg border text-sm transition-all h-[50px]", playStyle === "race" ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500")}
+                      onClick={() => setPlayStyle(PLAY_STYLE.RACE)}
+                      className={cn("p-2 rounded-lg border text-sm transition-all h-[50px]", playStyle === PLAY_STYLE.RACE ? "bg-blue-500/20 border-blue-500 text-blue-400" : "bg-slate-950 border-slate-800 text-slate-500")}
                    >
                       🚀 系统随机
                    </button>
                    <button 
-                      onClick={() => setPlayStyle("duel")}
-                      className={cn("p-2 rounded-lg border text-sm transition-all h-[50px]", playStyle === "duel" ? "bg-amber-500/20 border-amber-500 text-amber-400" : "bg-slate-950 border-slate-800 text-slate-500")}
+                      onClick={() => setPlayStyle(PLAY_STYLE.DUEL)}
+                      className={cn("p-2 rounded-lg border text-sm transition-all h-[50px]", playStyle === PLAY_STYLE.DUEL ? "bg-amber-500/20 border-amber-500 text-amber-400" : "bg-slate-950 border-slate-800 text-slate-500")}
                    >
                       ⚔️ 互相出题
                    </button>
@@ -128,13 +162,13 @@ export const LobbyView = ({
           )}
 
           {/* Start Button */}
-          {mode !== "multi_join" && (
+          {mode !== GAME_MODE.MULTI_JOIN && (
              <Button 
-                onClick={mode === "single" ? startSingleGame : startHostGame} 
+                onClick={mode === GAME_MODE.SINGLE ? startSingleGame : startHostGame} 
                 className="w-full h-14 text-lg mt-auto"
-                disabled={mode === "multi_host" && !isConnected}
+                disabled={mode === GAME_MODE.MULTI_HOST && connectedCount === 0}
              >
-                {mode === "single" ? "开始游戏" : `开始对战 ${playStyle === "duel" ? "(设置题目)" : ""}`}
+                {mode === GAME_MODE.SINGLE ? "开始游戏" : `开始对战 ${playStyle === PLAY_STYLE.DUEL ? "(设置题目)" : ""}`}
              </Button>
           )}
         </div>

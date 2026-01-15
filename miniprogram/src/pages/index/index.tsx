@@ -158,14 +158,21 @@ export default function Index() {
 
       <View style={{marginBottom: '20px', display: 'flex', justifyContent: 'center', gap: '8px'}}>
         {Array.from({length: digits}).map((_, i) => (
-          <View key={i} style={{
+          <View 
+            key={i} 
+            onClick={() => setActiveIndex(i)}
+            style={{
             width: '40px', height: '56px', border: '2px solid #334155', borderRadius: '8px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '24px', fontWeight: 'bold', color: 'white',
-            backgroundColor: i < guess.length ? 'rgba(30, 41, 59, 0.5)' : 'transparent',
-            borderColor: i === guess.length ? '#3b82f6' : '#334155'
+            backgroundColor: i === activeIndex ? 'rgba(59, 130, 246, 0.1)' : (guess[i] ? 'rgba(30, 41, 59, 0.5)' : 'transparent'),
+            borderColor: i === activeIndex ? '#3b82f6' : '#334155',
+            transition: 'all 0.2s ease'
           }}>
             {guess[i] || ''}
+            {i === activeIndex && !guess[i] && (
+               <View style={{width: '2px', height: '24px', backgroundColor: '#60a5fa', position: 'absolute'}} />
+            )}
           </View>
         ))}
       </View>

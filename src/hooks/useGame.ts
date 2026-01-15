@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { GameEngine, GuessResult } from "../game/engine";
-import { P2PManager, GameConfigPayload, GuessUpdatePayload, DuelInitPayload } from "../game/p2p";
+import { P2PManager, GameConfigPayload, GuessUpdatePayload, DuelInitPayload, PlayerInfoPayload } from "../game/p2p";
 import { GameMode, PlayStyle, MatchStrategy } from "../types";
+import { GAME_MODE, PLAY_STYLE, MATCH_STRATEGY, GAME_STATUS, VIEW, P2P_MESSAGE_TYPE } from "../constants";
+
+const generateRandomUsername = () => {
+  const adjectives = ["Happy", "Lucky", "Sunny", "Clever", "Brave", "Swift", "Calm", "Cool"];
+  const nouns = ["Panda", "Tiger", "Eagle", "Fox", "Bear", "Lion", "Wolf", "Hawk"];
+  return `${adjectives[Math.floor(Math.random() * adjectives.length)]}${nouns[Math.floor(Math.random() * nouns.length)]}${Math.floor(Math.random() * 100)}`;
+};
 
 export function useGame() {
   // --- State ---
@@ -10,23 +17,29 @@ export function useGame() {
   const [gameEngine, setGameEngine] = useState<GameEngine | null>(null);
   const [guess, setGuess] = useState("");
   const [history, setHistory] = useState<GuessResult[]>([]);
-  const [status, setStatus] = useState<"playing" | "won" | "lost" | "setting_secret">("playing");
+  const [status, setStatus] = useState<"playing" | "won" | "lost" | "setting_secret">(GAME_STATUS.PLAYING);
   const [error, setError] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Network & Flow State
-  const [mode, setMode] = useState<GameMode>("single");
-  const [playStyle, setPlayStyle] = useState<PlayStyle>("race");
-  const [matchStrategy, setMatchStrategy] = useState<MatchStrategy>('exact'); 
-  const [view, setView] = useState<"home" | "lobby" | "game">("home"); 
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [mode, setMode] = useState<GameMode>(GAME_MODE.SINGLE);
+  const [playStyle, setPlayStyle] = useState<PlayStyle>(PLAY_STYLE.RACE);
+  const [matchStrategy, setMatchStrategy] = useState<MatchStrategy>(MATCH_STRATEGY.EXACT); 
+  const [view, setView] = useState<"home" | "lobby" | "game">(VIEW.HOME); 
   const [p2p, setP2P] = useState<P2PManager | null>(null);
   const [myId, setMyId] = useState<string>("");
+  const [username, setUsername] = useState(generateRandomUsername());
   const [peerIdInput, setPeerIdInput] = useState("");
   const [isConnected, setIsConnected] = useState(false);
-  const [opponentStatus, setOpponentStatus] = useState<{
+  
+  // Opponent State (Map of PeerID -> State)
+  const [opponents, setOpponents] = useState<Map<string, {
+    username?: string;
     guessCount: number;
     lastResult: { exact: number; total: number } | null;
-  }>({ guessCount: 0, lastResult: null });
+  }>>(new Map());
   
   // Duel State
   const [mySecret, setMySecret] = useState("");
@@ -38,11 +51,11 @@ export function useGame() {
     return () => {
       p2p?.destroy();
     };
-  }, []);
+  }, [p2p]);
 
   // Check if we can start duel
   useEffect(() => {
-     if (mode !== "single" && playStyle === "duel" && mySecret && opponentSecret && status === "setting_secret") {
+     if (mode !== GAME_MODE.SINGLE && playStyle === PLAY_STYLE.DUEL && mySecret && opponentSecret && status === GAME_STATUS.SETTING_SECRET) {
          startDuelGame();
      }
   }, [mySecret, opponentSecret, status, mode, playStyle]);
@@ -56,10 +69,10 @@ export function useGame() {
 
   // Physical Keyboard Listener
   useEffect(() => {
-    if (view !== "game") return;
+    if (view !== VIEW.GAME) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (status !== "playing" && status !== "setting_secret") return;
+      if (status !== GAME_STATUS.PLAYING && status !== GAME_STATUS.SETTING_SECRET) return;
       
       if (/^[0-9]$/.test(e.key)) {
         handleVirtualKeyPress(e.key);
@@ -82,38 +95,91 @@ export function useGame() {
     const id = await newP2P.getId();
     setMyId(id);
     
-    newP2P.onConnect(() => {
+    newP2P.onConnect((peerId) => {
       setIsConnected(true);
       setError(null);
-      if (view !== "game") setView("lobby"); 
+      // Initialize opponent state
+      setOpponents(prev => {
+         const next = new Map(prev);
+         if (!next.has(peerId)) {
+             next.set(peerId, { guessCount: 0, lastResult: null });
+         }
+         return next;
+      });
+
+      // Send my username with a slight delay to ensure connection is ready
+      setTimeout(() => {
+        console.log(`[P2P] Sending username to ${peerId} (delayed): ${username}`);
+        newP2P.send({ type: P2P_MESSAGE_TYPE.PLAYER_INFO, payload: { username } }, peerId);
+      }, 500);
+      
+      if (view !== VIEW.GAME) setView(VIEW.LOBBY); 
     });
 
-    newP2P.onDisconnect(() => {
-      setIsConnected(false);
-      setError("对方已断开连接");
-      setMode("single");
-      setView("home");
-      setP2P(null);
+    newP2P.onDisconnect((peerId) => {
+      setOpponents(prev => {
+          const next = new Map(prev);
+          next.delete(peerId);
+          return next;
+      });
+      
+      if (mode === GAME_MODE.MULTI_JOIN) {
+          // If we are a client and disconnected from Host (usually only 1 connection), then reset
+          // But if P2PManager manages multiple, we need to know if this was THE host.
+          // For now, simple assumption: Client has only 1 connection.
+          setIsConnected(false);
+          setError("对方已断开连接");
+          setMode(GAME_MODE.SINGLE);
+          setView(VIEW.HOME);
+          setP2P(null);
+      }
     });
 
-    newP2P.onMessage((msg) => {
+    newP2P.onMessage((msg, peerId) => {
       switch (msg.type) {
-        case "GAME_START":
+        case P2P_MESSAGE_TYPE.GAME_START:
           const config = msg.payload as GameConfigPayload;
           handleRemoteGameStart(config);
           break;
-        case "DUEL_INIT":
+        case P2P_MESSAGE_TYPE.DUEL_INIT:
           const duelConfig = msg.payload as DuelInitPayload;
           handleDuelInit(duelConfig);
           break;
-        case "DUEL_READY":
+        case P2P_MESSAGE_TYPE.DUEL_READY:
            setOpponentSecret(msg.payload.secret);
            break;
-        case "GUESS_UPDATE":
-          setOpponentStatus(msg.payload as GuessUpdatePayload);
+        case P2P_MESSAGE_TYPE.GUESS_UPDATE:
+          const update = msg.payload as GuessUpdatePayload;
+          setOpponents(prev => new Map(prev).set(peerId, update));
           break;
-        case "GAME_OVER":
-          setStatus("lost");
+        case P2P_MESSAGE_TYPE.PLAYER_INFO:
+          const info = msg.payload as PlayerInfoPayload;
+          console.log(`[P2P] Received username from ${peerId}: ${info.username}`);
+          setOpponents(prev => {
+            const next = new Map(prev);
+            const existing = next.get(peerId) || { guessCount: 0, lastResult: null };
+            next.set(peerId, { ...existing, username: info.username });
+            return next;
+          });
+          break;
+        case P2P_MESSAGE_TYPE.ERROR:
+          setError(msg.payload.message);
+          setIsConnected(false);
+          // Don't change view here, let the user see the error in current view or redirect if needed
+          // But if we are in lobby and get error, maybe we should be kicked out?
+          // For join process, error handling is in handleJoin's catch block (which won't catch this async message).
+          // So if we are "connected" but then receive ERROR (like Room Full), we need to handle it.
+          if (view === VIEW.LOBBY && mode === GAME_MODE.MULTI_JOIN) {
+               // Kick out to home
+               setTimeout(() => {
+                   setView(VIEW.HOME);
+                   setMode(GAME_MODE.SINGLE);
+                   setP2P(null);
+               }, 2000);
+          }
+          break;
+        case P2P_MESSAGE_TYPE.GAME_OVER:
+          setStatus(GAME_STATUS.LOST);
           break;
       }
     });
@@ -126,7 +192,7 @@ export function useGame() {
 
   const handleRemoteGameStart = (config: GameConfigPayload) => {
     setDigits(config.digits);
-    setPlayStyle("race");
+    setPlayStyle(PLAY_STYLE.RACE);
     setMatchStrategy(config.matchStrategy);
     
     const engine = new GameEngine({ digits: config.digits, allowDuplicates: true });
@@ -135,19 +201,19 @@ export function useGame() {
     
     setGameEngine(engine);
     resetGameState();
-    setView("game");
+    setView(VIEW.GAME);
   };
 
   const handleDuelInit = (config: DuelInitPayload) => {
     setDigits(config.digits);
-    setPlayStyle("duel");
+    setPlayStyle(PLAY_STYLE.DUEL);
     setMatchStrategy(config.matchStrategy);
-    setStatus("setting_secret");
+    setStatus(GAME_STATUS.SETTING_SECRET);
     setMySecret("");
     setOpponentSecret(null);
     setHistory([]);
     setError(null);
-    setView("game");
+    setView(VIEW.GAME);
   };
 
   const startDuelGame = () => {
@@ -158,19 +224,35 @@ export function useGame() {
       engine["secret"] = opponentSecret;
       setGameEngine(engine);
       
-      setStatus("playing");
+      setStatus(GAME_STATUS.PLAYING);
       setHistory([]);
       setGuess("");
+      setActiveIndex(0);
       setError(null);
-      setOpponentStatus({ guessCount: 0, lastResult: null });
+      // Reset opponents stats
+      setOpponents(prev => {
+          const next = new Map();
+          for (const [key, val] of prev) {
+              next.set(key, { ...val, guessCount: 0, lastResult: null });
+          }
+          return next;
+      });
   };
 
   const resetGameState = () => {
     setHistory([]);
-    setStatus("playing");
+    setStatus(GAME_STATUS.PLAYING);
     setGuess("");
+    setActiveIndex(0);
     setError(null);
-    setOpponentStatus({ guessCount: 0, lastResult: null });
+    // Reset opponents stats
+    setOpponents(prev => {
+        const next = new Map();
+        for (const [key, val] of prev) {
+            next.set(key, { ...val, guessCount: 0, lastResult: null });
+        }
+        return next;
+    });
   };
 
   const startSingleGame = () => {
@@ -182,7 +264,7 @@ export function useGame() {
     const engine = new GameEngine({ digits: d, allowDuplicates: true });
     setGameEngine(engine);
     resetGameState();
-    setView("game");
+    setView(VIEW.GAME);
   };
 
   const startHostGame = async () => {
@@ -192,34 +274,61 @@ export function useGame() {
     if (d < 3) d = 3;
     if (d > 10) d = 10;
 
-    if (playStyle === "race") {
+    if (playStyle === PLAY_STYLE.RACE) {
         const engine = new GameEngine({ digits: d, allowDuplicates: true });
         setGameEngine(engine);
         resetGameState();
         const secret = engine.getSecret();
-        p2p.send({ type: "GAME_START", payload: { digits: d, allowDuplicates: true, matchStrategy, secret } });
+        p2p.send({ type: P2P_MESSAGE_TYPE.GAME_START, payload: { digits: d, allowDuplicates: true, matchStrategy, secret } });
     } else {
-        setStatus("setting_secret");
+        setStatus(GAME_STATUS.SETTING_SECRET);
         setMySecret("");
         setOpponentSecret(null);
-        p2p.send({ type: "DUEL_INIT", payload: { digits: d, allowDuplicates: true, matchStrategy } });
+        p2p.send({ type: P2P_MESSAGE_TYPE.DUEL_INIT, payload: { digits: d, allowDuplicates: true, matchStrategy } });
     }
-    setView("game");
+    setView(VIEW.GAME);
   };
 
   const handleJoin = async () => {
     if (!peerIdInput) return;
-    const manager = await initP2P();
-    manager.connect(peerIdInput);
-    setMode("multi_join");
-    setView("lobby");
-    setMatchStrategy("exact"); 
+    setIsInitializing(true);
+    // Move initP2P outside try-catch to ensure we get the manager to destroy it on error
+    let manager = p2p;
+    if (!manager) {
+        manager = await initP2P();
+    }
+    
+    try {
+      await manager.connect(peerIdInput);
+      setMode(GAME_MODE.MULTI_JOIN);
+      setView(VIEW.LOBBY);
+      setMatchStrategy(MATCH_STRATEGY.EXACT); 
+    } catch (e: any) {
+      // If connection fails, we should destroy the peer instance to allow retries
+      // and prevent "ghost" connections or weird states
+      if (!p2p) { // Only destroy if we just created it (or if we want to reset completely)
+          manager.destroy();
+          setP2P(null);
+      }
+      console.error(e);
+      setError(e.message || "连接失败");
+    } finally {
+      setIsInitializing(false);
+    }
   };
 
   const handleCreateRoom = async () => {
-    await initP2P();
-    setMode("multi_host");
-    setView("lobby");
+    setIsInitializing(true);
+    try {
+      await initP2P();
+      setMode(GAME_MODE.MULTI_HOST);
+      setView(VIEW.LOBBY);
+    } catch (e) {
+      console.error(e);
+      setError("创建房间失败");
+    } finally {
+      setIsInitializing(false);
+    }
   };
 
   const handleSecretSubmit = () => {
@@ -229,9 +338,10 @@ export function useGame() {
       
       setMySecret(guess);
       setGuess("");
+      setActiveIndex(0);
       setError(null);
       
-      p2p.send({ type: "DUEL_READY", payload: { secret: guess } });
+      p2p.send({ type: P2P_MESSAGE_TYPE.DUEL_READY, payload: { secret: guess } });
   };
 
   const validateInput = (val: string) => {
@@ -243,12 +353,12 @@ export function useGame() {
   };
 
   const handleSubmit = () => {
-    if (status === "setting_secret") {
+    if (status === GAME_STATUS.SETTING_SECRET) {
         handleSecretSubmit();
         return;
     }
 
-    if (!gameEngine || status !== "playing") return;
+    if (!gameEngine || status !== GAME_STATUS.PLAYING) return;
 
     if (!validateInput(guess)) return;
 
@@ -257,11 +367,12 @@ export function useGame() {
       const newHistory = [...history, result]; 
       setHistory(newHistory);
       setGuess("");
+      setActiveIndex(0);
       setError(null);
 
-      if (mode !== "single" && p2p) {
+      if (mode !== GAME_MODE.SINGLE && p2p) {
         p2p.send({
-          type: "GUESS_UPDATE",
+          type: P2P_MESSAGE_TYPE.GUESS_UPDATE,
           payload: {
             guessCount: newHistory.length,
             lastResult: { exact: result.exact, total: result.total }
@@ -269,18 +380,18 @@ export function useGame() {
         });
       }
 
-      if (matchStrategy === "exact") {
+      if (matchStrategy === MATCH_STRATEGY.EXACT) {
           if (result.exact === digits) {
-             setStatus("won");
-             if (mode !== "single" && p2p) {
-                p2p.send({ type: "GAME_OVER" });
+             setStatus(GAME_STATUS.WON);
+             if (mode !== GAME_MODE.SINGLE && p2p) {
+                p2p.send({ type: P2P_MESSAGE_TYPE.GAME_OVER });
              }
           }
       } else {
           if (result.exact === digits) {
-             setStatus("won");
-             if (mode !== "single" && p2p) {
-                p2p.send({ type: "GAME_OVER" });
+             setStatus(GAME_STATUS.WON);
+             if (mode !== GAME_MODE.SINGLE && p2p) {
+                p2p.send({ type: P2P_MESSAGE_TYPE.GAME_OVER });
              }
           }
       }
@@ -290,14 +401,35 @@ export function useGame() {
   };
 
   const handleVirtualKeyPress = (key: string) => {
-    if (guess.length < digits) {
-      setGuess(prev => prev + key);
+    // If input is full and cursor is at end, do nothing
+    if (guess.length >= digits && activeIndex >= digits) return;
+
+    let nextGuess = guess;
+    if (activeIndex >= guess.length) {
+      // Append mode
+      nextGuess = guess + key;
+    } else {
+      // Replace mode
+      nextGuess = guess.substring(0, activeIndex) + key + guess.substring(activeIndex + 1);
+    }
+
+    if (nextGuess.length <= digits) {
+      setGuess(nextGuess);
+      setActiveIndex(prev => Math.min(digits, prev + 1));
       setError(null); 
     }
   };
 
   const handleVirtualDelete = () => {
-    setGuess(prev => prev.slice(0, -1));
+    if (activeIndex === 0) return;
+
+    // Logic: Backspace always deletes the previous character (like standard input)
+    // If we are at index 2 (after 2nd char), delete index 1.
+    const idxToDelete = activeIndex - 1;
+    const nextGuess = guess.substring(0, idxToDelete) + guess.substring(idxToDelete + 1);
+    
+    setGuess(nextGuess);
+    setActiveIndex(prev => Math.max(0, prev - 1));
   };
 
   const copyId = () => {
@@ -321,11 +453,15 @@ export function useGame() {
     view, setView,
     p2p, setP2P,
     myId,
+    username, setUsername,
     peerIdInput, setPeerIdInput,
     isConnected,
-    opponentStatus,
+    isInitializing,
+    opponents,
     mySecret,
     opponentSecret,
+    activeIndex,
+    setActiveIndex,
     handleJoin,
     handleCreateRoom,
     startSingleGame,

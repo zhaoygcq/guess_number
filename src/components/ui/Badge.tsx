@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "../../utils/cn";
 
-export const Badge = ({ children, color = "slate" }: { children: React.ReactNode; color?: "slate" | "blue" | "green" | "amber" | "red" }) => {
+export const Badge = ({ children, color = "slate", className }: { children: React.ReactNode; color?: "slate" | "blue" | "green" | "amber" | "red"; className?: string }) => {
   const colors = {
     slate: "bg-slate-800 text-slate-300 border-slate-700",
     blue: "bg-blue-500/10 text-blue-400 border-blue-500/20",
@@ -10,7 +10,7 @@ export const Badge = ({ children, color = "slate" }: { children: React.ReactNode
     red: "bg-red-500/10 text-red-400 border-red-500/20",
   };
   return (
-    <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-semibold border", colors[color])}>
+    <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-semibold border", colors[color], className)}>
       {children}
     </span>
   );

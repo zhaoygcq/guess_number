@@ -1,11 +1,13 @@
+import { useState, useEffect } from "react";
 import { 
-  XCircle, Shield, Trophy, Users, History, CheckCircle2, Crown, AlertCircle, RefreshCw 
+  XCircle, Shield, Trophy, Users, History, CheckCircle2, Crown, AlertCircle, RefreshCw, ChevronUp 
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { VirtualKeyboard } from "../ui/VirtualKeyboard";
 import { cn } from "../../utils/cn";
 import { GameMode, PlayStyle, MatchStrategy } from "../../types";
 import { GameEngine, GuessResult } from "../../game/engine";
+import { GAME_MODE, PLAY_STYLE, MATCH_STRATEGY, GAME_STATUS, VIEW } from "../../constants";
 
 type GameViewProps = {
   setView: (view: any) => void;
@@ -15,7 +17,7 @@ type GameViewProps = {
   playStyle: PlayStyle;
   matchStrategy: MatchStrategy;
   status: "playing" | "won" | "lost" | "setting_secret";
-  opponentStatus: any;
+  opponents?: Map<string, any>;
   history: GuessResult[];
   scrollRef: any;
   mySecret: string;
@@ -27,57 +29,93 @@ type GameViewProps = {
   handleSubmit: () => void;
   startSingleGame: () => void;
   startHostGame: () => void;
+  activeIndex: number;
+  setActiveIndex: (index: number) => void;
+  username: string;
 };
 
 export const GameView = ({
   setView, setStatus, digits, mode, playStyle, matchStrategy, status,
-  opponentStatus, history, scrollRef, mySecret, gameEngine, guess, error,
-  handleVirtualKeyPress, handleVirtualDelete, handleSubmit, startSingleGame, startHostGame
+  opponents, history, scrollRef, mySecret, gameEngine, guess, error,
+  handleVirtualKeyPress, handleVirtualDelete, handleSubmit, startSingleGame, startHostGame,
+  activeIndex, setActiveIndex, username
 }: GameViewProps) => {
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(true);
+
+  // Auto-open keyboard when game starts or status changes to input-ready states
+  useEffect(() => {
+    if (status === GAME_STATUS.PLAYING || status === GAME_STATUS.SETTING_SECRET) {
+       setIsKeyboardOpen(true);
+    }
+  }, [status]);
+
   return (
-    <div className="max-w-lg mx-auto w-full h-full flex flex-col gap-2 animate-in fade-in duration-500 pb-safe">
+    <div className="max-w-lg mx-auto w-full h-full flex flex-col gap-2 animate-in fade-in duration-500 pb-safe relative">
       {/* Header Bar */}
       <div className="flex items-center justify-between bg-slate-900/50 p-3 rounded-xl border border-slate-800 backdrop-blur shrink-0">
-         <Button variant="ghost" onClick={() => { setView("lobby"); setStatus("playing"); }} className="px-2 h-8 text-xs">
-           <XCircle className="w-4 h-4 mr-1"/> 退出
-         </Button>
-         <div className="flex items-center gap-4 text-sm font-medium text-slate-400">
-            <span className="flex items-center gap-1">{digits}位</span>
-            {mode !== "single" && (
-                <span className={cn("flex items-center gap-1", playStyle === "duel" ? "text-amber-400" : "text-blue-400")}>
-                    {playStyle === "duel" ? <Shield className="w-3 h-3"/> : <Trophy className="w-3 h-3"/>}
-                    {playStyle === "duel" ? "对决" : "竞速"}
-                </span>
+         <div className="flex items-center gap-2">
+             <Button variant="ghost" onClick={() => { setView(VIEW.LOBBY); setStatus(GAME_STATUS.PLAYING); }} className="px-2 h-8 text-xs">
+               <XCircle className="w-4 h-4 mr-1"/> 退出
+             </Button>
+             <div className="h-4 w-px bg-slate-800 mx-1"></div>
+             <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-800/50 border border-slate-700/50">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]"></span>
+                <span className="text-xs font-mono font-bold text-slate-300 max-w-[80px] truncate">{username}</span>
+             </div>
+         </div>
+         <div className="flex flex-col items-end">
+            <div className="flex items-center gap-4 text-sm font-medium text-slate-400">
+                <span className="flex items-center gap-1">{digits}位</span>
+                {mode !== GAME_MODE.SINGLE && (
+                    <span className={cn("flex items-center gap-1", playStyle === PLAY_STYLE.DUEL ? "text-amber-400" : "text-blue-400")}>
+                        {playStyle === PLAY_STYLE.DUEL ? <Shield className="w-3 h-3"/> : <Trophy className="w-3 h-3"/>}
+                        {playStyle === PLAY_STYLE.DUEL ? "对决" : "竞速"}
+                    </span>
+                )}
+            </div>
+            {mode !== GAME_MODE.SINGLE && mySecret && status === GAME_STATUS.PLAYING && (
+                <div className="text-xs text-amber-500/80 font-mono mt-1">
+                   我出的题: <span className="font-bold">{mySecret}</span>
+                </div>
             )}
          </div>
       </div>
 
       {/* Opponent Status Bar (Multiplayer) */}
-      {mode !== "single" && status === "playing" && (
-        <div className="flex items-center justify-between bg-slate-800/40 p-3 rounded-xl border border-slate-700/50 shrink-0">
-           <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
-                 <Users className="w-4 h-4 text-slate-400"/>
-              </div>
-              <div className="flex flex-col">
-                 <span className="text-xs font-bold text-slate-400">对手进度</span>
-                 <span className="text-sm font-mono text-slate-200">已猜 {opponentStatus.guessCount} 次</span>
-              </div>
-           </div>
-           {opponentStatus.lastResult ? (
-              <div className="flex gap-2 text-sm font-mono bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-800">
-                  <span className={cn("font-bold", matchStrategy === "exact" ? "text-blue-400" : "text-purple-400")}>
-                    {matchStrategy === "exact" ? "全匹配" : "数匹配"}: {matchStrategy === "exact" ? opponentStatus.lastResult.exact : opponentStatus.lastResult.total}
-                  </span>
-              </div>
-           ) : (
-              <span className="text-xs text-slate-500 italic">思考中...</span>
-           )}
+      {mode !== GAME_MODE.SINGLE && status === GAME_STATUS.PLAYING && opponents && opponents.size > 0 && (
+        <div className="flex flex-col gap-2 shrink-0">
+           {Array.from(opponents.entries()).map(([id, status]) => (
+                <div key={id} className="flex items-center justify-between bg-slate-800/40 p-3 rounded-xl border border-slate-700/50">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                            <Users className="w-4 h-4 text-slate-400"/>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-400">
+                                {status.username || `对手 (${id.substring(0, 4)})`}
+                            </span>
+                            <span className="text-sm font-mono text-slate-200">已猜 {status.guessCount} 次</span>
+                        </div>
+                    </div>
+                    {status.lastResult ? (
+                        <div className="flex gap-2 text-sm font-mono bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-800">
+                            <span className={cn("font-bold", matchStrategy === MATCH_STRATEGY.EXACT ? "text-blue-400" : "text-purple-400")}>
+                                {matchStrategy === MATCH_STRATEGY.EXACT ? "全匹配" : "数匹配"}: {matchStrategy === MATCH_STRATEGY.EXACT ? status.lastResult.exact : status.lastResult.total}
+                            </span>
+                        </div>
+                    ) : (
+                        <span className="text-xs text-slate-500 italic">思考中...</span>
+                    )}
+                </div>
+           ))}
         </div>
       )}
 
       {/* History List - Scrollable Area */}
-      <div className="flex-1 relative overflow-hidden bg-slate-900/20 rounded-2xl border border-slate-800/30">
+      <div 
+        className="flex-1 relative overflow-hidden bg-slate-900/20 rounded-2xl border border-slate-800/30"
+        onClick={() => setIsKeyboardOpen(false)}
+      >
          <div className="absolute inset-0 overflow-y-auto p-4 custom-scrollbar" ref={scrollRef}>
              {history.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-2 opacity-50">
@@ -92,9 +130,9 @@ export const GameView = ({
                          <div className="flex gap-2">
                             <span className={cn(
                                "px-2 py-1 rounded-md text-xs font-bold min-w-[3.5rem] text-center",
-                               matchStrategy === "exact" ? "bg-blue-500/20 text-blue-400" : "bg-purple-500/20 text-purple-400"
+                               matchStrategy === MATCH_STRATEGY.EXACT ? "bg-blue-500/20 text-blue-400" : "bg-purple-500/20 text-purple-400"
                             )}>
-                               {matchStrategy === "exact" ? "全匹配" : "数匹配"}: {matchStrategy === "exact" ? item.exact : item.total}
+                               {matchStrategy === MATCH_STRATEGY.EXACT ? "全匹配" : "数匹配"}: {matchStrategy === MATCH_STRATEGY.EXACT ? item.exact : item.total}
                             </span>
                          </div>
                       </div>
@@ -106,29 +144,30 @@ export const GameView = ({
 
       {/* Input Display Area */}
       <div className="shrink-0 pt-2 pb-2 flex flex-col items-center relative">
-         {/* Setting Secret Overlay */}
-         {status === "setting_secret" && (
+         {/* Setting Secret Overlay - Waiting State Only */}
+         {status === GAME_STATUS.SETTING_SECRET && mySecret && (
             <div className="absolute inset-0 z-20 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center rounded-2xl animate-in fade-in">
-               {!mySecret ? (
-                  <>
-                     <h2 className="text-xl font-bold text-amber-400 mb-2 animate-pulse">设置谜底</h2>
-                     <p className="text-slate-400 text-sm mb-4">请输入 {digits} 位数字</p>
-                  </>
-               ) : (
                   <div className="space-y-4">
                      <div className="text-3xl font-mono tracking-[0.5em] text-amber-400 font-bold">{mySecret}</div>
                      <p className="text-sm text-emerald-400 flex items-center justify-center gap-2">
                         <CheckCircle2 className="w-4 h-4"/> 等待对手设置...
                      </p>
                   </div>
-               )}
+            </div>
+         )}
+
+         {/* Setting Secret Instructions - Input State */}
+         {status === GAME_STATUS.SETTING_SECRET && !mySecret && (
+            <div className="text-center mb-4 animate-in slide-in-from-top-2">
+                <h2 className="text-xl font-bold text-amber-400 mb-1">设置谜底</h2>
+                <p className="text-slate-400 text-xs">请输入 {digits} 位数字</p>
             </div>
          )}
          
          {/* Result Overlay */}
-         {(status === "won" || status === "lost") && (
+         {(status === GAME_STATUS.WON || status === GAME_STATUS.LOST) && (
             <div className="absolute inset-0 z-20 bg-slate-900/95 flex flex-col items-center justify-center p-6 text-center space-y-4 rounded-2xl animate-in fade-in">
-                {status === "won" ? (
+                {status === GAME_STATUS.WON ? (
                    <>
                       <Crown className="w-16 h-16 text-emerald-400 mx-auto animate-bounce"/>
                       <h2 className="text-3xl font-bold text-white">恭喜胜利！</h2>
@@ -143,7 +182,7 @@ export const GameView = ({
                    正确答案是 <span className="font-mono font-bold text-white mx-1 text-xl">{gameEngine?.getSecret()}</span>
                 </p>
                 <Button onClick={() => {
-                    if (mode === "single") startSingleGame();
+                    if (mode === GAME_MODE.SINGLE) startSingleGame();
                     else startHostGame(); 
                 }} icon={RefreshCw} className="w-full max-w-xs">
                    再来一局
@@ -155,20 +194,28 @@ export const GameView = ({
          <div className="flex justify-center gap-2 mb-2 w-full px-4">
             {Array.from({ length: digits }).map((_, i) => {
                const char = guess[i];
-               const isActive = i === guess.length && (status === "playing" || status === "setting_secret");
+               // Active if it matches activeIndex
+               const isActive = i === activeIndex && (status === GAME_STATUS.PLAYING || status === GAME_STATUS.SETTING_SECRET);
                const isFilled = !!char;
                
                return (
                   <div 
                      key={i}
+                     onClick={() => {
+                        setActiveIndex(i);
+                        setIsKeyboardOpen(true);
+                     }}
                      className={cn(
-                        "h-14 flex-1 max-w-[3.5rem] rounded-xl border-2 flex items-center justify-center text-3xl font-mono font-bold transition-all duration-200",
+                        "h-14 flex-1 max-w-[3.5rem] rounded-xl border-2 flex items-center justify-center text-3xl font-mono font-bold transition-all duration-200 cursor-pointer select-none",
                         isActive ? "border-blue-500 bg-blue-500/10 shadow-[0_0_10px_rgba(59,130,246,0.5)] scale-105 z-10" : 
                         isFilled ? "border-slate-700 bg-slate-800/50 text-slate-100" : 
                         "border-slate-800 bg-slate-900/30 text-slate-700"
                      )}
                   >
                      {char}
+                     {isActive && !char && (
+                        <div className="w-0.5 h-6 bg-blue-400 animate-pulse absolute" />
+                     )}
                   </div>
                );
             })}
@@ -183,14 +230,40 @@ export const GameView = ({
       </div>
 
       {/* Virtual Keyboard */}
-      <div className="shrink-0 bg-slate-900/50 rounded-t-2xl border-t border-slate-800/50 pb-safe">
-        <VirtualKeyboard 
-          onKeyPress={handleVirtualKeyPress}
-          onDelete={handleVirtualDelete}
-          onSubmit={handleSubmit}
-          canSubmit={guess.length === digits && (status === "playing" || (status === "setting_secret" && !mySecret))}
-        />
+      <div className={cn(
+          "shrink-0 bg-slate-900/50 rounded-t-2xl border-t border-slate-800/50 transition-all duration-300 ease-out z-30",
+          isKeyboardOpen ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 h-0 overflow-hidden"
+      )}>
+        {/* Drag/Click Handle to Close */}
+        <div 
+            className="flex items-center justify-center py-1 cursor-pointer hover:bg-slate-800/50 active:bg-slate-800 transition-colors"
+            onClick={() => setIsKeyboardOpen(false)}
+        >
+            <div className="w-12 h-1 bg-slate-700 rounded-full"/>
+        </div>
+        
+        <div className="pb-safe">
+            <VirtualKeyboard 
+            onKeyPress={handleVirtualKeyPress}
+            onDelete={handleVirtualDelete}
+            onSubmit={handleSubmit}
+            canSubmit={guess.length === digits && (status === GAME_STATUS.PLAYING || (status === GAME_STATUS.SETTING_SECRET && !mySecret))}
+            />
+        </div>
       </div>
+      
+      {/* Re-open handle (visible when keyboard is closed) */}
+      {!isKeyboardOpen && (status === GAME_STATUS.PLAYING || status === GAME_STATUS.SETTING_SECRET) && (
+         <div className="absolute bottom-safe left-0 right-0 flex justify-center pb-2 z-20 pointer-events-none">
+             <Button 
+                variant="secondary" 
+                className="pointer-events-auto shadow-lg shadow-black/50 animate-in slide-in-from-bottom-4 fade-in rounded-full px-6 opacity-80 hover:opacity-100 backdrop-blur-md bg-slate-800/80 border-slate-700 py-1 h-8 text-xs"
+                onClick={() => setIsKeyboardOpen(true)}
+             >
+                <ChevronUp className="w-4 h-4 mr-1"/> 打开键盘
+             </Button>
+         </div>
+      )}
     </div>
   );
 };
