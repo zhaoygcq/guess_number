@@ -10,6 +10,10 @@
     "tauri": "tauri"
   },
   "dependencies": {
+		"clsx": "^1.2.1",
+		"lucide-react": "^0.562.0",
+		"peerjs": "^1.5.5",
+		"tailwind-merge": "^3.4.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "react": "^19.1.0",
