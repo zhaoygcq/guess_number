@@ -259,14 +259,16 @@ export const GameView = ({
                   <div 
                      key={i}
                      onClick={() => {
+                        if (!isMyTurn) return; // Disable click if not my turn
                         setActiveIndex(i);
                         setIsKeyboardOpen(true);
                      }}
                      className={cn(
-                        "h-14 flex-1 max-w-[3.5rem] rounded-xl border-2 flex items-center justify-center text-3xl font-mono font-bold transition-all duration-200 cursor-pointer select-none",
+                        "h-14 flex-1 max-w-[3.5rem] rounded-xl border-2 flex items-center justify-center text-3xl font-mono font-bold transition-all duration-200 select-none",
                         isActive ? "border-blue-500 bg-blue-500/10 shadow-[0_0_10px_rgba(59,130,246,0.5)] scale-105 z-10" : 
                         isFilled ? "border-slate-700 bg-slate-800/50 text-slate-100" : 
-                        "border-slate-800 bg-slate-900/30 text-slate-700"
+                        "border-slate-800 bg-slate-900/30 text-slate-700",
+                        !isMyTurn ? "cursor-not-allowed opacity-80" : "cursor-pointer"
                      )}
                   >
                      {char}
@@ -304,13 +306,13 @@ export const GameView = ({
             onKeyPress={handleVirtualKeyPress}
             onDelete={handleVirtualDelete}
             onSubmit={handleSubmit}
-            canSubmit={guess.length === digits && (status === GAME_STATUS.PLAYING || (status === GAME_STATUS.SETTING_SECRET && !mySecret))}
+            canSubmit={isMyTurn && guess.length === digits && (status === GAME_STATUS.PLAYING || (status === GAME_STATUS.SETTING_SECRET && !mySecret))}
             />
         </div>
       </div>
       
       {/* Re-open handle (visible when keyboard is closed) */}
-      {!isKeyboardOpen && (status === GAME_STATUS.PLAYING || status === GAME_STATUS.SETTING_SECRET) && (
+      {!isKeyboardOpen && (status === GAME_STATUS.PLAYING || status === GAME_STATUS.SETTING_SECRET) && isMyTurn && (
          <div className="absolute bottom-safe left-0 right-0 flex justify-center pb-2 z-20 pointer-events-none">
              <Button 
                 variant="secondary" 

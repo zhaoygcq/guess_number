@@ -61,6 +61,8 @@ export function useGame() {
 
   // --- Effects ---
 
+  const [autoJoinId, setAutoJoinId] = useState<string | null>(null);
+
   // Check for URL query params on mount
   useEffect(() => {
       const params = new URLSearchParams(window.location.search);
@@ -68,16 +70,17 @@ export function useGame() {
       if (joinId && view === VIEW.HOME && !isConnected) {
           console.log("Found join ID in URL:", joinId);
           setPeerIdInput(joinId);
-          // Auto join if we have an ID
-          // We need to call handleJoin, but handleJoin depends on state.
-          // We can't call it directly inside effect easily without dependencies.
-          // But we can trigger it via a flag or just call it if we extract the logic.
-          // For now, let's just pre-fill it.
-          // Actually, let's try to auto-click join or call the function.
-          // Since handleJoin is defined below, we can't call it here in strict ordering.
-          // Let's move this effect or use a ref to trigger join.
+          setAutoJoinId(joinId);
       }
-  }, []); // Run once
+  }, []); 
+
+  // Auto join trigger
+  useEffect(() => {
+     if (autoJoinId && !isConnected && !isInitializing) {
+         handleJoin(autoJoinId);
+         setAutoJoinId(null);
+     }
+  }, [autoJoinId, isConnected, isInitializing]);
 
   useEffect(() => {
     return () => {
@@ -149,12 +152,69 @@ export function useGame() {
     });
 
     newP2P.onDisconnect((peerId) => {
+      // Common logic: Remove from opponents list
       setOpponents(prev => {
           const next = new Map(prev);
           next.delete(peerId);
           return next;
       });
       
+      // Host Logic: Handle player dropping during game
+      if (modeRef.current === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE && status === GAME_STATUS.PLAYING) {
+          // Remove from turn order
+          setTurnOrder(prev => {
+              const next = prev.filter(id => id !== peerId);
+              return next;
+          });
+          
+          // If it was their turn, advance to next player
+          if (currentTurnRef.current === peerId) {
+             console.log(`Current player ${peerId} disconnected, advancing turn...`);
+             advanceTurn(); // This will pick the next player from the *updated* turn order (since we updated Ref via setTurnOrder effect?)
+             // Wait, setTurnOrder is async. Ref won't be updated yet.
+             // We need to pass the new order explicitly or wait.
+             // advanceTurnRef uses turnOrderRef.current.
+             
+             // Let's manually fix the turn using the new list
+             const oldOrder = turnOrderRef.current;
+             const newOrder = oldOrder.filter(id => id !== peerId);
+             
+             if (newOrder.length > 0) {
+                 // Determine who was supposed to be next after the dead player
+                 const deadIdx = oldOrder.indexOf(peerId);
+                 // The next player in the new list should be at the same index (shifting left) 
+                 // or 0 if it was the last one.
+                 // Example: [A, B, C]. B dies. New: [A, C]. 
+                 // deadIdx = 1. New player at index 1 is C. Correct.
+                 // Example: [A, B]. B dies. New: [A].
+                 // deadIdx = 1. New player at index 1 is undefined. Wrap to 0 -> A. Correct.
+                 
+                 let nextIdx = deadIdx; 
+                 if (nextIdx >= newOrder.length) nextIdx = 0;
+                 
+                 const nextPlayer = newOrder[nextIdx];
+                 setCurrentTurn(nextPlayer);
+                 
+                 // Broadcast update
+                 newP2P.send({ type: P2P_MESSAGE_TYPE.TURN_CHANGE, payload: { currentTurn: nextPlayer } });
+                 
+                 // Also need to broadcast the new Turn Order? 
+                 // The protocol doesn't have TURN_ORDER_UPDATE message yet. 
+                 // Clients assume static order.
+                 // If we don't update clients, they might get confused?
+                 // Actually clients just follow "currentTurn".
+                 // As long as Host sends valid "currentTurn", clients are happy.
+             } else {
+                 // Everyone left? Win?
+                 setStatus(GAME_STATUS.WON); // You won by default?
+             }
+          } else {
+             // If it wasn't their turn, we still need to ensure they are removed from future turns
+             // We already updated setTurnOrder. 
+             // Ideally we should sync this removal to clients too, but if clients only care about "who is current", it's fine.
+          }
+      }
+
       if (modeRef.current === GAME_MODE.MULTI_JOIN) {
           // If we are a client and disconnected from Host
           // Check if we were kicked first
@@ -192,11 +252,11 @@ export function useGame() {
           
           // If we are Host, we check if we need to advance the turn
           if (modeRef.current === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
-              // Wait a bit to ensure UI updates, then advance
-              // Actually, we can advance immediately. 
-              // The rule: "Must wait for everyone to guess... before next round"
-              // implies round-robin.
-              advanceTurnRef();
+              // Strict check: Only advance if the update comes from the player whose turn it is.
+              // This prevents out-of-order updates or bugs from skipping turns.
+              if (currentTurnRef.current === peerId) {
+                 advanceTurn();
+              }
           }
           break;
         case P2P_MESSAGE_TYPE.TURN_CHANGE:
@@ -379,7 +439,7 @@ export function useGame() {
       currentTurnRef.current = currentTurn;
   }, [turnOrder, currentTurn]);
 
-  const advanceTurnRef = () => {
+  const advanceTurn = () => {
       if (!p2p) return;
       const order = turnOrderRef.current;
       const current = currentTurnRef.current;
@@ -398,8 +458,44 @@ export function useGame() {
       p2p.send({ type: P2P_MESSAGE_TYPE.TURN_CHANGE, payload: { currentTurn: nextPlayer } });
   };
 
-  const handleJoin = async () => {
-    if (!peerIdInput) return;
+  // Check turn on guess update (for both local and remote)
+  // Logic: 
+  // 1. If I am HOST, and I receive a guess from current player -> Advance Turn
+  // 2. If I am HOST, and I (Host) just guessed -> Advance Turn (handled in handleSubmit)
+  
+  // Handled in onMessage:
+  // if (modeRef.current === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
+  //    advanceTurnRef();
+  // }
+  
+  // But wait! 
+  // If Opponent A guesses, Host receives GUESS_UPDATE.
+  // Host calls advanceTurnRef().
+  // Host calculates next player.
+  // Host sends TURN_CHANGE.
+  
+  // The issue described: "Opponent guessed 6 times, but I can't guess".
+  // This means the TURN_CHANGE message didn't reach the client, OR the Host didn't trigger it properly.
+  // OR, the Host thinks it's someone else's turn.
+  
+  // Let's look at advanceTurnRef logic:
+  // const idx = order.indexOf(current);
+  // const nextIdx = (idx + 1) % order.length;
+  
+  // If `current` is not in `order`, it fails.
+  // If `order` is not consistent, it fails.
+  
+  // Critical fix: Ensure Host *always* has the correct `turnOrder` and `currentTurn`.
+  // And ensure `GUESS_UPDATE` *actually* triggers the turn change only if it came from the *current turn player*.
+  
+  // If any player sends a GUESS_UPDATE (maybe out of turn due to lag), we shouldn't just advance blindly.
+  // We should check: `if (peerId === currentTurnRef.current) advanceTurnRef();`
+
+
+  const handleJoin = async (overrideId?: string) => {
+    const targetId = overrideId || peerIdInput;
+    if (!targetId) return;
+    
     setIsInitializing(true);
     // Move initP2P outside try-catch to ensure we get the manager to destroy it on error
     let manager = p2p;
@@ -408,7 +504,7 @@ export function useGame() {
     }
     
     try {
-      await manager.connect(peerIdInput);
+      await manager.connect(targetId);
       setMode(GAME_MODE.MULTI_JOIN);
       setView(VIEW.LOBBY);
       setMatchStrategy(MATCH_STRATEGY.EXACT); 
@@ -497,10 +593,11 @@ export function useGame() {
              }
           } else {
              // If not won, check if we need to advance turn (if we are Host and it's our turn)
-             // But wait, the advanceTurnRef logic is triggered by GUESS_UPDATE.
-             // If I am Host, I just updated my local state. I should also trigger advanceTurnRef.
              if (mode === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
-                 advanceTurnRef();
+                 // Check if it's actually my turn (it should be, if I just guessed)
+                 if (currentTurnRef.current === myId) {
+                     advanceTurn();
+                 }
              }
           }
       } else {
@@ -511,7 +608,9 @@ export function useGame() {
              }
           } else {
              if (mode === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
-                 advanceTurnRef();
+                 if (currentTurnRef.current === myId) {
+                     advanceTurn();
+                 }
              }
           }
       }

@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "peer-server": "cd peer-server && npm start",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

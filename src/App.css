@@ -5,6 +5,10 @@
 @layer base {
   body {
     @apply bg-slate-950 text-slate-100;
+    /* Prevent pull-to-refresh on mobile */
+    overscroll-behavior: none;
+    /* Prevent tap highlight on mobile */
+    -webkit-tap-highlight-color: transparent;
   }
 }
 

@@ -179,9 +179,27 @@ export class P2PManager {
     conn.on("data", (data) => {
       const msg = data as NetworkMessage;
       // Auto-reply to HANDSHAKE
+      // Only reply if I am NOT the one who initiated the handshake (i.e. I received it first)
+      // But PeerJS data channels are bidirectional.
+      // To prevent loop:
+      // 1. Handshake request (A -> B)
+      // 2. Handshake reply (B -> A)
+      // 3. A should NOT reply to B again.
+      
+      // Currently logic:
+      // if msg == HANDSHAKE -> send HANDSHAKE.
+      // A sends HS -> B receives HS -> B sends HS -> A receives HS -> A sends HS ... LOOP!
+      
+      // Fix: Add a payload to distinguish REQUEST vs ACK, or just don't auto-reply if we already established?
+      // Simpler fix: Use payload to indicate "ACK".
+      
       if (msg.type === P2P_MESSAGE_TYPE.HANDSHAKE) {
-          console.log("Received HANDSHAKE from " + conn.peer + ", replying...");
-          conn.send({ type: P2P_MESSAGE_TYPE.HANDSHAKE });
+          if (msg.payload?.ack) {
+              console.log("Received HANDSHAKE ACK from " + conn.peer);
+          } else {
+              console.log("Received HANDSHAKE from " + conn.peer + ", replying with ACK...");
+              conn.send({ type: P2P_MESSAGE_TYPE.HANDSHAKE, payload: { ack: true } });
+          }
       }
 
       if (this.onMessageCallback) {

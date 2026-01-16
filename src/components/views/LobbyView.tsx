@@ -1,4 +1,4 @@
-import { Settings, Copy, CheckCircle2, Users, X, Share2 } from "lucide-react";
+import { Settings, CheckCircle2, Users, X, Share2 } from "lucide-react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";

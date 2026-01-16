@@ -1,78 +1,60 @@
-# 自托管 PeerServer 指南
+# PeerServer 配置指南
 
-如果您希望完全控制连接数据，或者在没有互联网连接的局域网环境中使用，您可以自己部署 `peerjs-server`。
+本项目使用自托管的 PeerServer 进行多人联机。
 
-## 1. 安装 PeerJS Server
+## 1. 当前配置
 
-首先，您需要一个 Node.js 环境。
-
-```bash
-mkdir my-peer-server
-cd my-peer-server
-npm init -y
-npm install peer
-```
-
-## 2. 创建服务器脚本
-
-创建 `index.js` 文件：
-
-```javascript
-const { PeerServer } = require('peer');
-
-const port = 9000;
-
-const peerServer = PeerServer({
-  port: port,
-  path: '/guess-number'
-});
-
-console.log(`PeerServer running on port ${port}, path: /guess-number`);
-```
-
-## 3. 运行服务器
-
-```bash
-node index.js
-```
-
-## 4. 配置前端项目
-
-在 `guess-number` 项目根目录下创建 `.env` 文件（或修改现有的）：
+前端连接的 PeerServer 配置位于 `.env` 文件中：
 
 ```env
-VITE_PEER_HOST=localhost
-VITE_PEER_PORT=9000
-VITE_PEER_PATH=/guess-number
-VITE_PEER_SECURE=false
-```
-
-> 注意：如果您部署在服务器上，请将 `VITE_PEER_HOST` 更改为您的服务器 IP 或域名。如果您的网站使用 HTTPS，则 PeerServer 也必须使用 HTTPS（需要配置 SSL 证书），并将 `VITE_PEER_SECURE` 设置为 `true`。
-
-## 5. 重新启动前端
-
-```bash
-npm run dev
-```
-
-## 6. 部署到 Deno Deploy
-
-如果您希望免费部署到公网，可以使用 Deno Deploy。
-
-1.  将代码推送到 GitHub。
-2.  访问 [Deno Deploy](https://dash.deno.com)。
-3.  创建新项目，选择您的仓库。
-4.  设置 **Entrypoint** 为 `peer-server/server.ts`。
-5.  部署成功后，获取您的项目域名（例如 `your-project.deno.dev`）。
-
-**更新前端配置：**
-
-```env
-VITE_PEER_HOST=your-project.deno.dev
+VITE_PEER_HOST=real-zebra-15.zhaoygcq.deno.net
 VITE_PEER_PORT=443
 VITE_PEER_PATH=/guess-number
 VITE_PEER_SECURE=true
 ```
 
-> 注意：Deno Deploy 强制使用 HTTPS，所以端口必须是 `443`，且 `VITE_PEER_SECURE` 必须为 `true`。
+## 2. 服务端代码备份
 
+由于您已经将服务部署在 Deno Playground/Deploy 上，本地的 `peer-server` 文件夹已被移除。
+
+如果您需要重新部署，可以使用以下代码（保存为 `server.ts`）：
+
+```typescript
+import express from "npm:express@4.18.2";
+import { ExpressPeerServer } from "npm:peer@1.0.0";
+
+// Deno Deploy sets the PORT environment variable (defaults to 8000)
+const PORT = Number(Deno.env.get("PORT")) || 9000;
+const PATH = "/guess-number";
+
+console.log(`Starting PeerServer on port ${PORT}...`);
+
+const app = express();
+
+// Health check endpoint for Deno Deploy
+app.get("/", (_req: any, res: any) => {
+  res.send("PeerJS Server is running OK");
+});
+
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`PeerServer running on port ${PORT}, path: ${PATH}`);
+});
+
+// Initialize PeerServer
+const peerServer = ExpressPeerServer(server, {
+  allow_discovery: true,
+  proxied: true,
+  path: "/" 
+});
+
+// Mount PeerJS at the specified path
+app.use(PATH, peerServer);
+
+peerServer.on("connection", (client: any) => {
+  console.log(`Client connected: ${client.getId()}`);
+});
+
+peerServer.on("disconnect", (client: any) => {
+  console.log(`Client disconnected: ${client.getId()}`);
+});
+```
