@@ -1,6 +1,5 @@
 
-import Peer, { DataConnection } from "peerjs";
-import { P2P_MESSAGE_TYPE, MAX_PLAYERS } from "../constants";
+import { P2P_MESSAGE_TYPE } from "../constants";
 import { MatchStrategy } from "../types";
 
 export type MessageType = typeof P2P_MESSAGE_TYPE[keyof typeof P2P_MESSAGE_TYPE];
@@ -38,231 +37,188 @@ export interface GuessUpdatePayload {
   lastResult: { exact: number, total: number };
 }
 
+/**
+ * GameNetworkManager (formerly P2PManager)
+ * Re-implemented using WebSocket Relay for centralized communication
+ * to avoid P2P NAT issues.
+ */
 export class P2PManager {
-  private peer: Peer;
-  private conns: Map<string, DataConnection> = new Map();
+  private ws: WebSocket | null = null;
+  private myId: string = "";
+  private pendingIdResolve: ((id: string) => void) | null = null;
+  
+  // Callbacks
   private onMessageCallback: ((msg: NetworkMessage, peerId: string) => void) | null = null;
   private onConnectCallback: ((peerId: string) => void) | null = null;
   private onDisconnectCallback: ((peerId: string) => void) | null = null;
-  
-  public myId: string = "";
 
   constructor() {
-    const peerConfig: any = {
-        config: {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-            ]
-        },
-        pingInterval: 5000, 
-        debug: 1
-    };
+    this.initWebSocket();
+  }
 
-    // Check for custom PeerServer config from env
-    const host = import.meta.env.VITE_PEER_HOST;
-    const port = import.meta.env.VITE_PEER_PORT;
-    const path = import.meta.env.VITE_PEER_PATH;
-    const secure = import.meta.env.VITE_PEER_SECURE;
-
-    if (host && port) {
-        console.log(`Using custom PeerServer: ${host}:${port}${path || "/"}`);
-        peerConfig.host = host;
-        peerConfig.port = Number(port);
-        peerConfig.path = path || "/";
-        peerConfig.secure = secure === "true";
+  private initWebSocket() {
+    const relayServer = import.meta.env.VITE_RELAY_SERVER;
+    if (!relayServer) {
+        console.error("VITE_RELAY_SERVER is not defined!");
+        return;
     }
 
-    this.peer = new Peer(peerConfig);
-    
-    this.peer.on("open", (id) => {
-      this.myId = id;
-      console.log("My Peer ID is: " + id);
-    });
+    console.log(`Connecting to Relay Server: ${relayServer}`);
+    this.ws = new WebSocket(relayServer);
 
-    this.peer.on("connection", (conn) => {
-      // Check for max players
-      if (this.conns.size >= MAX_PLAYERS - 1) { // -1 because I am one player
-          console.warn("Room full, rejecting connection from", conn.peer);
-          const handleOpen = () => {
-              conn.send({ type: P2P_MESSAGE_TYPE.ERROR, payload: { message: "房间已满" } });
-              setTimeout(() => conn.close(), 500);
-          };
+    this.ws.onopen = () => {
+        console.log("WebSocket connected");
+    };
+
+    this.ws.onmessage = (e) => {
+        try {
+            const msg = JSON.parse(e.data);
+            this.handleInternalMessage(msg);
+        } catch (err) {
+            console.error("Failed to parse WS message", err);
+        }
+    };
+
+    this.ws.onclose = () => {
+        console.log("WebSocket closed");
+        // Reconnect logic could go here
+    };
+    
+    this.ws.onerror = () => {
+        // Avoid cyclic error structure when logging
+        console.error("WebSocket error"); 
+    };
+  }
+
+  private handleInternalMessage(msg: any) {
+      switch (msg.type) {
+          case "WELCOME":
+              this.myId = msg.id;
+              console.log(`My Socket ID: ${this.myId}`);
+              if (this.pendingIdResolve) {
+                  this.pendingIdResolve(this.myId);
+                  this.pendingIdResolve = null;
+              }
+              // Auto-join my own room (as host)
+              this.sendInternal({ type: "JOIN", roomId: this.myId });
+              break;
+              
+          case "PEER_JOINED":
+              console.log(`Peer joined: ${msg.peerId}`);
+              if (this.onConnectCallback) this.onConnectCallback(msg.peerId);
+              break;
+              
+          case "PEER_LEFT":
+              console.log(`Peer left: ${msg.peerId}`);
+              if (this.onDisconnectCallback) this.onDisconnectCallback(msg.peerId);
+              break;
+              
+          case "ROOM_MEMBERS":
+              console.log(`Room members: ${JSON.stringify(msg.members)}`);
+              msg.members.forEach((mid: string) => {
+                  if (this.onConnectCallback) this.onConnectCallback(mid);
+              });
+              break;
+              
+          case "SIGNAL":
+              // Unwrap signal message
+              if (msg.data && msg.from) {
+                  // Special handle for KICK
+                  if (msg.data.type === "KICK") {
+                      // Disconnect self
+                      if (this.onDisconnectCallback) this.onDisconnectCallback("HOST"); // Or specific msg
+                      // Actually KICK is usually handled by useGame via onMessage
+                  }
+                  
+                  if (this.onMessageCallback) {
+                      this.onMessageCallback(msg.data, msg.from);
+                  }
+              }
+              break;
+      }
+  }
+  
+  private sendInternal(msg: any) {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify(msg));
+      } else {
+          console.warn("WS not open, cannot send", msg);
+      }
+  }
+
+  // --- Public Interface (Matching old P2PManager) ---
+
+  public getId(): Promise<string> {
+      if (this.myId) return Promise.resolve(this.myId);
+      return new Promise((resolve) => {
+          this.pendingIdResolve = resolve;
+      });
+  }
+
+  public connect(roomId: string): Promise<void> {
+      // In Relay mode, "connect" means "join room"
+      return new Promise((resolve, reject) => {
+          if (!this.ws) {
+              reject(new Error("WebSocket not initialized"));
+              return;
+          }
           
-          if (conn.open) {
-              handleOpen();
-          } else {
-              conn.on("open", handleOpen);
+          if (this.ws.readyState !== WebSocket.OPEN) {
+              // Wait for open? Or reject?
+              // Simple retry logic for open
+              const check = setInterval(() => {
+                  if (this.ws?.readyState === WebSocket.OPEN) {
+                      clearInterval(check);
+                      this.doJoin(roomId, resolve);
+                  } else if (this.ws?.readyState === WebSocket.CLOSED) {
+                      clearInterval(check);
+                      reject(new Error("Connection failed"));
+                  }
+              }, 100);
+              return;
           }
-          return;
-      }
-      this.handleConnection(conn);
-    });
-    
-    this.peer.on("error", (err) => {
-        console.error("PeerJS Error:", err);
-    });
+          
+          this.doJoin(roomId, resolve);
+      });
   }
-
-  public connect(peerId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Check if already connected
-      if (this.conns.has(peerId)) {
-          console.warn("Already connected to " + peerId);
-          resolve();
-          return;
-      }
-      const conn = this.peer.connect(peerId);
-
-      const cleanup = () => {
-          clearTimeout(timer);
-          conn.off("open", onOpen);
-          conn.off("data", onHandshakeData); // Stop listening for handshake
-          conn.off("error", onError);
-          conn.off("close", onClose);
-          this.peer.off("error", onPeerError);
-      };
-
-      const timer = setTimeout(() => {
-          cleanup();
-          conn.close();
-          reject(new Error("连接超时(15s)，可能是网络环境(NAT)限制，请尝试切换网络或关闭VPN"));
-      }, 15000);
-
-      const onOpen = () => {
-          console.log("Connection opened to " + peerId + ", sending HANDSHAKE");
-          conn.send({ type: P2P_MESSAGE_TYPE.HANDSHAKE });
-      };
-
-      const onHandshakeData = (data: any) => {
-          if (data && data.type === P2P_MESSAGE_TYPE.HANDSHAKE) {
-              console.log("Received HANDSHAKE from " + peerId);
-              cleanup();
-              resolve();
-          }
-      };
-
-      const onError = (err: any) => {
-          cleanup();
-          reject(err);
-      };
-
-      const onClose = () => {
-          cleanup();
-          reject(new Error("连接被关闭"));
-      };
-
-      const onPeerError = (err: any) => {
-          if (err.type === 'peer-unavailable') {
-               // Usually message is "Could not connect to peer XXXXX"
-               cleanup();
-               reject(new Error("房间不存在"));
-          }
-      };
-
-      conn.on("open", onOpen);
-      conn.on("data", onHandshakeData);
-      conn.on("error", onError);
-      conn.on("close", onClose);
-      this.peer.on("error", onPeerError);
-
-      this.handleConnection(conn);
-    });
-  }
-
-  private handleConnection(conn: DataConnection) {
-    this.conns.set(conn.peer, conn);
-    
-    conn.on("open", () => {
-      console.log("Connected to: " + conn.peer);
-      if (this.onConnectCallback) this.onConnectCallback(conn.peer);
-    });
-
-    conn.on("data", (data) => {
-      const msg = data as NetworkMessage;
-      // Auto-reply to HANDSHAKE
-      // Only reply if I am NOT the one who initiated the handshake (i.e. I received it first)
-      // But PeerJS data channels are bidirectional.
-      // To prevent loop:
-      // 1. Handshake request (A -> B)
-      // 2. Handshake reply (B -> A)
-      // 3. A should NOT reply to B again.
-      
-      // Currently logic:
-      // if msg == HANDSHAKE -> send HANDSHAKE.
-      // A sends HS -> B receives HS -> B sends HS -> A receives HS -> A sends HS ... LOOP!
-      
-      // Fix: Add a payload to distinguish REQUEST vs ACK, or just don't auto-reply if we already established?
-      // Simpler fix: Use payload to indicate "ACK".
-      
-      if (msg.type === P2P_MESSAGE_TYPE.HANDSHAKE) {
-          if (msg.payload?.ack) {
-              console.log("Received HANDSHAKE ACK from " + conn.peer);
-          } else {
-              console.log("Received HANDSHAKE from " + conn.peer + ", replying with ACK...");
-              conn.send({ type: P2P_MESSAGE_TYPE.HANDSHAKE, payload: { ack: true } });
-          }
-      }
-
-      if (this.onMessageCallback) {
-        this.onMessageCallback(msg, conn.peer);
-      }
-    });
-
-    conn.on("close", () => {
-      console.log("Connection closed: " + conn.peer);
-      this.conns.delete(conn.peer);
-      if (this.onDisconnectCallback) this.onDisconnectCallback(conn.peer);
-    });
-    
-    conn.on("error", (err) => {
-        console.error("Connection error:", err);
-        this.conns.delete(conn.peer);
-        if (this.onDisconnectCallback) this.onDisconnectCallback(conn.peer);
-    });
+  
+  private doJoin(roomId: string, resolve: () => void) {
+      console.log(`Joining room: ${roomId}`);
+      this.sendInternal({ type: "JOIN", roomId });
+      // Assume success for now, or wait for ROOM_MEMBERS?
+      // P2P connect resolves when connection is open.
+      // Here we resolve immediately after sending JOIN.
+      resolve(); 
   }
 
   public send(msg: NetworkMessage, targetPeerId?: string) {
-    if (targetPeerId) {
-        const conn = this.conns.get(targetPeerId);
-        if (conn && conn.open) {
-            conn.send(msg);
-        } else {
-            console.warn(`Cannot send to ${targetPeerId}, connection not open`);
-        }
-    } else {
-        // Broadcast to all
-        this.conns.forEach(conn => {
-            if (conn.open) {
-                conn.send(msg);
-            }
-        });
-    }
+      // Send SIGNAL
+      // Sanitize msg to ensure no circular references before sending
+      // But NetworkMessage should be clean JSON usually.
+      // The circular error might be coming from Vue/React wrapping objects?
+      // Let's shallow copy or ensure it's clean.
+      
+      this.sendInternal({
+          type: "SIGNAL",
+          target: targetPeerId,
+          data: msg
+      });
   }
 
   public kick(peerId: string) {
-    const conn = this.conns.get(peerId);
-    if (conn) {
-        conn.send({ type: P2P_MESSAGE_TYPE.KICK, payload: { message: "你已被房主移出房间" } });
-        // Close after a short delay to ensure message is sent
-        setTimeout(() => {
-            conn.close();
-            this.conns.delete(peerId);
-            if (this.onDisconnectCallback) this.onDisconnectCallback(peerId);
-        }, 500);
-    }
+      // Send KICK signal
+      this.sendInternal({
+          type: "KICK",
+          target: peerId
+      });
   }
 
   public onMessage(cb: (msg: NetworkMessage, peerId: string) => void) {
-    this.onMessageCallback = cb;
+      this.onMessageCallback = cb;
   }
 
   public onConnect(cb: (peerId: string) => void) {
-    this.onConnectCallback = cb;
+      this.onConnectCallback = cb;
   }
   
   public onDisconnect(cb: (peerId: string) => void) {
@@ -270,16 +226,9 @@ export class P2PManager {
   }
 
   public destroy() {
-    this.peer.destroy();
-    this.conns.clear();
-  }
-  
-  public getId(): Promise<string> {
-      return new Promise((resolve) => {
-          if (this.myId) resolve(this.myId);
-          else {
-              this.peer.on('open', (id) => resolve(id));
-          }
-      });
+      if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+      }
   }
 }
