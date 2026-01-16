@@ -1,4 +1,4 @@
-name = "guess"
+name = "ws"
 compatibility_date = "2026-01-15"
 
 # 核心配置：绑定静态资源目录
