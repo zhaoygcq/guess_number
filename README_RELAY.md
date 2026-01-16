@@ -29,6 +29,14 @@ Deno.serve((req: Request) => {
         
         if (msg.type === "JOIN") {
             const roomId = msg.roomId;
+
+            // 房间号有效性验证：
+            // 1. 如果是房主(roomId === id)，允许创建新房间
+            // 2. 如果是访客(roomId !== id)，必须加入已存在的房间
+            if (roomId !== id && !rooms.has(roomId)) {
+                socket.send(JSON.stringify({ type: "ERROR", message: "房间不存在或已过期" }));
+                return;
+            }
             
             // 如果已经在其他房间，先退出
             const oldRoom = socketRooms.get(id);

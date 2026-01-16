@@ -95,7 +95,7 @@ export const HomeView = ({
               onChange={e => setPeerIdInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && peerIdInput && !isInitializing && handleJoin()}
             />
-            <Button onClick={handleJoin} disabled={!peerIdInput || isInitializing} icon={isInitializing ? Loader2 : LogIn} isLoading={isInitializing}>
+            <Button onClick={() => handleJoin()} disabled={!peerIdInput || isInitializing} icon={isInitializing ? Loader2 : LogIn} isLoading={isInitializing}>
               {isInitializing ? "连接中" : "加入"}
             </Button>
           </div>

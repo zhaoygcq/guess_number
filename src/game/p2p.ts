@@ -47,6 +47,9 @@ export class P2PManager {
   private myId: string = "";
   private pendingIdResolve: ((id: string) => void) | null = null;
   
+  private pendingConnectResolve: (() => void) | null = null;
+  private pendingConnectReject: ((err: Error) => void) | null = null;
+  
   // Callbacks
   private onMessageCallback: ((msg: NetworkMessage, peerId: string) => void) | null = null;
   private onConnectCallback: ((peerId: string) => void) | null = null;
@@ -115,6 +118,20 @@ export class P2PManager {
               
           case "ROOM_MEMBERS":
               console.log(`Room members: ${JSON.stringify(msg.members)}`);
+              
+              if (this.pendingConnectResolve) {
+                  // If connecting as a client (not host auto-join), we expect members to be present.
+                  // If members is empty, it means we joined an empty room (created it), which is invalid for "Joining".
+                  if (msg.members && msg.members.length > 0) {
+                      this.pendingConnectResolve();
+                  } else {
+                      this.pendingConnectReject?.(new Error("房间不存在或房主已离开"));
+                      // Optional: Leave this empty room?
+                  }
+                  this.cleanupPendingConnect();
+                  // Continue to process members for UI update
+              }
+              
               msg.members.forEach((mid: string) => {
                   if (this.onConnectCallback) this.onConnectCallback(mid);
               });
@@ -133,6 +150,14 @@ export class P2PManager {
                   if (this.onMessageCallback) {
                       this.onMessageCallback(msg.data, msg.from);
                   }
+              }
+              break;
+
+          case "ERROR":
+              console.error(`Server Error: ${msg.message}`);
+              if (this.pendingConnectResolve) {
+                  this.pendingConnectReject?.(new Error(msg.message || "未知错误"));
+                  this.cleanupPendingConnect();
               }
               break;
       }
@@ -169,7 +194,7 @@ export class P2PManager {
               const check = setInterval(() => {
                   if (this.ws?.readyState === WebSocket.OPEN) {
                       clearInterval(check);
-                      this.doJoin(roomId, resolve);
+                      this.doJoin(roomId, resolve, reject);
                   } else if (this.ws?.readyState === WebSocket.CLOSED) {
                       clearInterval(check);
                       reject(new Error("Connection failed"));
@@ -178,17 +203,29 @@ export class P2PManager {
               return;
           }
           
-          this.doJoin(roomId, resolve);
+          this.doJoin(roomId, resolve, reject);
       });
   }
   
-  private doJoin(roomId: string, resolve: () => void) {
+  private doJoin(roomId: string, resolve: () => void, reject: (err: Error) => void) {
       console.log(`Joining room: ${roomId}`);
+      this.pendingConnectResolve = resolve;
+      this.pendingConnectReject = reject;
+      
       this.sendInternal({ type: "JOIN", roomId });
-      // Assume success for now, or wait for ROOM_MEMBERS?
-      // P2P connect resolves when connection is open.
-      // Here we resolve immediately after sending JOIN.
-      resolve(); 
+      
+      // Timeout
+      setTimeout(() => {
+          if (this.pendingConnectResolve) {
+              this.pendingConnectReject?.(new Error("加入房间超时"));
+              this.cleanupPendingConnect();
+          }
+      }, 5000);
+  }
+
+  private cleanupPendingConnect() {
+      this.pendingConnectResolve = null;
+      this.pendingConnectReject = null;
   }
 
   public send(msg: NetworkMessage, targetPeerId?: string) {
