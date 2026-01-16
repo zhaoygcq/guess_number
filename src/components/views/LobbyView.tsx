@@ -65,11 +65,11 @@ export const LobbyView = ({
                     </div>
                 </Tooltip>
                 <Button variant="secondary" onClick={copyId} icon={Share2} className="px-3 shrink-0">
-                  分享链接
+                  复制房间号
                 </Button>
               </div>
               <p className="text-[10px] text-slate-500 text-center">
-                 发送链接给好友，点击即可加入房间
+                 发送房间号给好友，好友输入即可加入房间
               </p>
               {connectedCount > 0 ? (
                  <div className="space-y-1 mt-2">

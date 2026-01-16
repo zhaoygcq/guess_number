@@ -38,6 +38,7 @@ export function useGame() {
   const modeRef = useRef(mode);
   const viewRef = useRef(view);
   const isKickedRef = useRef(false);
+  const hostIdRef = useRef<string | null>(null);
 
   useEffect(() => {
       modeRef.current = mode;
@@ -59,9 +60,15 @@ export function useGame() {
   const [mySecret, setMySecret] = useState("");
   const [opponentSecret, setOpponentSecret] = useState<string | null>(null);
 
+  // UI State
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // --- Effects ---
 
-  const [autoJoinId, setAutoJoinId] = useState<string | null>(null);
+  // Reset isSubmitting when turn changes
+  useEffect(() => {
+    setIsSubmitting(false);
+  }, [currentTurn]);
 
   // Check for URL query params on mount
   useEffect(() => {
@@ -70,17 +77,17 @@ export function useGame() {
       if (joinId && view === VIEW.HOME && !isConnected) {
           console.log("Found join ID in URL:", joinId);
           setPeerIdInput(joinId);
-          setAutoJoinId(joinId);
+          // setAutoJoinId(joinId); // Disabled auto join
       }
   }, []); 
 
-  // Auto join trigger
-  useEffect(() => {
-     if (autoJoinId && !isConnected && !isInitializing) {
-         handleJoin(autoJoinId);
-         setAutoJoinId(null);
-     }
-  }, [autoJoinId, isConnected, isInitializing]);
+  // Auto join trigger removed
+  // useEffect(() => {
+  //    if (autoJoinId && !isConnected && !isInitializing) {
+  //        handleJoin(autoJoinId);
+  //        setAutoJoinId(null);
+  //    }
+  // }, [autoJoinId, isConnected, isInitializing]);
 
   useEffect(() => {
     return () => {
@@ -130,6 +137,13 @@ export function useGame() {
     const id = await newP2P.getId();
     setMyId(id);
     
+    newP2P.onIdChange((newId) => {
+        console.log("ID changed due to reconnect:", newId);
+        setMyId(newId);
+        // If we were hosting, we might need to notify players?
+        // But players are disconnected anyway if server restarted.
+    });
+
     newP2P.onConnect((peerId) => {
       setIsConnected(true);
       setError(null);
@@ -217,6 +231,13 @@ export function useGame() {
 
       if (modeRef.current === GAME_MODE.MULTI_JOIN) {
           // If we are a client and disconnected from Host
+          
+          // Only exit if the HOST disconnected
+          if (hostIdRef.current && peerId !== hostIdRef.current) {
+              console.log(`Ignoring disconnect from non-host peer: ${peerId}`);
+              return;
+          }
+
           // Check if we were kicked first
           if (isKickedRef.current) {
               // We were kicked, so the KICK message handler will handle the UI reset.
@@ -226,10 +247,11 @@ export function useGame() {
           }
 
           setIsConnected(false);
-          setError("对方已断开连接");
+          setError("房主已断开连接");
           setMode(GAME_MODE.SINGLE);
           setView(VIEW.HOME);
           setP2P(null);
+          hostIdRef.current = null;
       }
     });
 
@@ -254,7 +276,11 @@ export function useGame() {
           if (modeRef.current === GAME_MODE.MULTI_HOST && playStyle === PLAY_STYLE.RACE) {
               // Strict check: Only advance if the update comes from the player whose turn it is.
               // This prevents out-of-order updates or bugs from skipping turns.
-              if (currentTurnRef.current === peerId) {
+              
+              // NOTE: Use Refs to get latest state inside callback!
+              const current = currentTurnRef.current;
+              
+              if (current === peerId) {
                  advanceTurn();
               }
           }
@@ -439,23 +465,39 @@ export function useGame() {
       currentTurnRef.current = currentTurn;
   }, [turnOrder, currentTurn]);
 
+  const p2pRef = useRef<P2PManager | null>(null);
+  useEffect(() => { p2pRef.current = p2p; }, [p2p]);
+
   const advanceTurn = () => {
-      if (!p2p) return;
+      const manager = p2pRef.current;
+      if (!manager) {
+          console.warn("Cannot advance turn: P2P manager not ready");
+          return;
+      }
+      
       const order = turnOrderRef.current;
       const current = currentTurnRef.current;
+      
+      console.log("Advancing turn. Current:", current, "Order:", order);
+      
       if (!order.length || !current) return;
 
       const idx = order.indexOf(current);
-      if (idx === -1) return;
+      if (idx === -1) {
+          console.warn("Current player not in turn order!", current, order);
+          return;
+      }
 
       const nextIdx = (idx + 1) % order.length;
       const nextPlayer = order[nextIdx];
       
+      console.log("Next player:", nextPlayer);
+      
       // Update local state
-      setCurrentTurn(nextPlayer); // Triggers useEffect -> updates Ref
+      setCurrentTurn(nextPlayer); 
       
       // Broadcast
-      p2p.send({ type: P2P_MESSAGE_TYPE.TURN_CHANGE, payload: { currentTurn: nextPlayer } });
+      manager.send({ type: P2P_MESSAGE_TYPE.TURN_CHANGE, payload: { currentTurn: nextPlayer } });
   };
 
   // Check turn on guess update (for both local and remote)
@@ -496,7 +538,11 @@ export function useGame() {
     const targetId = overrideId || peerIdInput;
     if (!targetId) return;
     
+    // Prevent double submission
+    if (isInitializing) return;
+
     setIsInitializing(true);
+    
     // Move initP2P outside try-catch to ensure we get the manager to destroy it on error
     let manager = p2p;
     if (!manager) {
@@ -505,6 +551,7 @@ export function useGame() {
     
     try {
       await manager.connect(targetId);
+      hostIdRef.current = targetId; // Store Host ID
       setMode(GAME_MODE.MULTI_JOIN);
       setView(VIEW.LOBBY);
       setMatchStrategy(MATCH_STRATEGY.EXACT); 
@@ -525,7 +572,8 @@ export function useGame() {
   const handleCreateRoom = async () => {
     setIsInitializing(true);
     try {
-      await initP2P();
+      const manager = await initP2P();
+      await manager.createRoom(); // Explicitly create room
       setMode(GAME_MODE.MULTI_HOST);
       setView(VIEW.LOBBY);
     } catch (e) {
@@ -598,6 +646,8 @@ export function useGame() {
                  if (currentTurnRef.current === myId) {
                      advanceTurn();
                  }
+             } else if (mode === GAME_MODE.MULTI_JOIN && playStyle === PLAY_STYLE.RACE) {
+                 setIsSubmitting(true);
              }
           }
       } else {
@@ -611,6 +661,8 @@ export function useGame() {
                  if (currentTurnRef.current === myId) {
                      advanceTurn();
                  }
+             } else if (mode === GAME_MODE.MULTI_JOIN && playStyle === PLAY_STYLE.RACE) {
+                 setIsSubmitting(true);
              }
           }
       }
@@ -652,11 +704,9 @@ export function useGame() {
   };
 
   const copyId = () => {
-    // Copy the full URL with join param
-    const url = new URL(window.location.href);
-    url.searchParams.set("join", myId);
-    navigator.clipboard.writeText(url.toString());
-    setError("链接已复制到剪贴板"); 
+    // Copy only the Room ID
+    navigator.clipboard.writeText(myId);
+    setError("房间号已复制到剪贴板"); 
     setTimeout(() => setError(null), 2000);
   };
 
@@ -700,6 +750,7 @@ export function useGame() {
     handleVirtualDelete,
     kickPlayer,
     currentTurn,
-    turnOrder
+    turnOrder,
+    isSubmitting
   };
 }

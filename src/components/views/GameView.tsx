@@ -36,13 +36,14 @@ type GameViewProps = {
   currentTurn?: string | null;
   turnOrder?: string[];
   myId?: string;
+  isSubmitting?: boolean;
 };
 
 export const GameView = ({
   setView, setStatus, digits, mode, playStyle, matchStrategy, status,
   opponents, history, scrollRef, mySecret, gameEngine, guess, error,
   handleVirtualKeyPress, handleVirtualDelete, handleSubmit, startSingleGame, startHostGame,
-  activeIndex, setActiveIndex, username, targetPeerId, currentTurn, myId
+  activeIndex, setActiveIndex, username, targetPeerId, currentTurn, myId, isSubmitting
 }: GameViewProps) => {
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(true);
 
@@ -195,7 +196,11 @@ export const GameView = ({
                          <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce"></span>
                      </div>
                      <p className="text-sm font-medium text-amber-400">
-                         等待 <span className="font-bold underline">{getCurrentTurnUsername()}</span> 行动...
+                         {isSubmitting ? (
+                             "正在同步..."
+                         ) : (
+                             <>等待 <span className="font-bold underline">{getCurrentTurnUsername()}</span> 行动...</>
+                         )}
                      </p>
                  </div>
              </div>

@@ -55,6 +55,8 @@ export class P2PManager {
   private onConnectCallback: ((peerId: string) => void) | null = null;
   private onDisconnectCallback: ((peerId: string) => void) | null = null;
 
+  private onIdChangeCallback: ((id: string) => void) | null = null;
+
   constructor() {
     this.initWebSocket();
   }
@@ -71,6 +73,10 @@ export class P2PManager {
 
     this.ws.onopen = () => {
         console.log("WebSocket connected");
+        // Reset ID on reconnect
+        if (this.myId) {
+             console.log("Reconnected, waiting for new ID...");
+        }
     };
 
     this.ws.onmessage = (e) => {
@@ -84,7 +90,11 @@ export class P2PManager {
 
     this.ws.onclose = () => {
         console.log("WebSocket closed");
-        // Reconnect logic could go here
+        // Reconnect logic
+        setTimeout(() => {
+             console.log("Attempting reconnect...");
+             this.initWebSocket();
+        }, 3000);
     };
     
     this.ws.onerror = () => {
@@ -98,12 +108,17 @@ export class P2PManager {
           case "WELCOME":
               this.myId = msg.id;
               console.log(`My Socket ID: ${this.myId}`);
+              
+              // Notify ID change
+              if (this.onIdChangeCallback) {
+                  this.onIdChangeCallback(this.myId);
+              }
+              
               if (this.pendingIdResolve) {
                   this.pendingIdResolve(this.myId);
                   this.pendingIdResolve = null;
               }
-              // Auto-join my own room (as host)
-              this.sendInternal({ type: "JOIN", roomId: this.myId });
+              // Don't auto-join here to avoid race conditions with manual join
               break;
               
           case "PEER_JOINED":
@@ -177,6 +192,22 @@ export class P2PManager {
       if (this.myId) return Promise.resolve(this.myId);
       return new Promise((resolve) => {
           this.pendingIdResolve = resolve;
+      });
+  }
+
+  public createRoom(): Promise<void> {
+      return new Promise((resolve, reject) => {
+          if (!this.ws || !this.myId) {
+              reject(new Error("Not connected"));
+              return;
+          }
+          
+          console.log(`Creating room: ${this.myId}`);
+          this.sendInternal({ type: "JOIN", roomId: this.myId });
+          // We don't strictly need to wait for ROOM_MEMBERS for creation,
+          // but we can if we want to be sure.
+          // For now, resolve immediately as "Host creation" is always allowed by server logic
+          resolve();
       });
   }
 
@@ -262,8 +293,14 @@ export class P2PManager {
       this.onDisconnectCallback = cb;
   }
 
+  public onIdChange(cb: (id: string) => void) {
+      this.onIdChangeCallback = cb;
+  }
+
   public destroy() {
       if (this.ws) {
+          // Prevent reconnect loop on destroy
+          this.ws.onclose = null; 
           this.ws.close();
           this.ws = null;
       }
