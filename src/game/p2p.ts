@@ -52,9 +52,15 @@ export class P2PManager {
         config: {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
                 { urls: 'stun:global.stun.twilio.com:3478' }
             ]
-        }
+        },
+        pingInterval: 5000, 
+        debug: 1
     };
 
     // Check for custom PeerServer config from env
@@ -124,8 +130,8 @@ export class P2PManager {
       const timer = setTimeout(() => {
           cleanup();
           conn.close();
-          reject(new Error("连接超时，房间可能不存在"));
-      }, 5000);
+          reject(new Error("连接超时(15s)，可能是网络环境(NAT)限制，请尝试切换网络或关闭VPN"));
+      }, 15000);
 
       const onOpen = () => {
           console.log("Connection opened to " + peerId + ", sending HANDSHAKE");
