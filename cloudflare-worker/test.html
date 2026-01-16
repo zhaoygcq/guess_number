@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket Test - Guess Number Relay</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+    #status { padding: 10px; border-radius: 4px; margin: 10px 0; }
+    .connected { background: #d4edda; color: #155724; }
+    .disconnected { background: #f8d7da; color: #721c24; }
+    #log { height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; background: #f5f5f5; font-family: monospace; font-size: 12px; }
+    .log-entry { margin: 4px 0; }
+    .log-error { color: red; }
+    .log-success { color: green; }
+    .log-info { color: blue; }
+    button { padding: 8px 16px; margin: 5px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    button.disconnect { background: #dc3545; }
+    button.disconnect:hover { background: #c82333; }
+    input { padding: 8px; width: 200px; margin: 5px; border: 1px solid #ccc; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>🎮 Guess Number Relay WebSocket 测试</h1>
+
+  <div id="status" class="disconnected">连接状态: 未连接</div>
+
+  <div style="margin: 10px 0;">
+    <input type="text" id="url" value="ws://localhost:8787" placeholder="ws://localhost:8787">
+    <button onclick="connect()">连接</button>
+    <button onclick="disconnect()" class="disconnect">断开</button>
+  </div>
+
+  <div style="margin: 10px 0;">
+    <input type="text" id="message" placeholder="输入消息 (JSON格式)">
+    <button onclick="sendMessage()">发送消息</button>
+    <button onclick="sendJoin()">加入房间</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    let ws = null;
+
+    function connect() {
+      const url = document.getElementById('url').value;
+
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+
+      log(`正在连接: ${url}`, 'info');
+
+      try {
+        ws = new WebSocket(url);
+
+        ws.onopen = function() {
+          log('✅ 连接成功!', 'success');
+          document.getElementById('status').textContent = '连接状态: 已连接';
+          document.getElementById('status').className = 'connected';
+        };
+
+        ws.onmessage = function(event) {
+          log(`📨 收到: ${event.data}`, 'info');
+          try {
+            const data = JSON.parse(event.data);
+            log(`解析数据: ${JSON.stringify(data)}`, 'info');
+          } catch (e) {
+            // 不是 JSON
+          }
+        };
+
+        ws.onclose = function(event) {
+          log(`❌ 连接关闭 (code: ${event.code})`, 'error');
+          document.getElementById('status').textContent = '连接状态: 已断开';
+          document.getElementById('status').className = 'disconnected';
+          ws = null;
+        };
+
+        ws.onerror = function(error) {
+          log(`❌ 错误: ${error}`, 'error');
+        };
+      } catch (e) {
+        log(`❌ 连接失败: ${e.message}`, 'error');
+      }
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        ws = null;
+        log('主动断开连接', 'info');
+      }
+    }
+
+    function sendMessage() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('❌ 未连接，无法发送消息', 'error');
+        return;
+      }
+
+      const msg = document.getElementById('message').value;
+      if (!msg) {
+        log('❌ 请输入消息内容', 'error');
+        return;
+      }
+
+      try {
+        // 如果输入的不是 JSON，包裹成 JSON
+        let data = msg;
+        try {
+          JSON.parse(msg);
+        } catch (e) {
+          data = JSON.stringify({ type: 'message', data: msg });
+        }
+
+        ws.send(data);
+        log(`📤 发送: ${data}`, 'info');
+      } catch (e) {
+        log(`❌ 发送失败: ${e.message}`, 'error');
+      }
+    }
+
+    function sendJoin() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('❌ 未连接，无法发送消息', 'error');
+        return;
+      }
+
+      const joinMsg = JSON.stringify({
+        type: 'JOIN',
+        roomId: 'test123'
+      });
+
+      ws.send(joinMsg);
+      log(`📤 发送加入房间: ${joinMsg}`, 'info');
+    }
+
+    function log(message, type = 'info') {
+      const logDiv = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logDiv.appendChild(entry);
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    // 页面加载时输出帮助信息
+    log('请先确认 wrangler dev 正在运行', 'info');
+    log('默认连接地址: ws://localhost:8787', 'info');
+    log('如果是 HTTPS 页面，可能需要使用 wrangler dev --local-https', 'info');
+  </script>
+</body>
+</html>
