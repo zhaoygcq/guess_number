@@ -61,6 +61,24 @@ export function useGame() {
 
   // --- Effects ---
 
+  // Check for URL query params on mount
+  useEffect(() => {
+      const params = new URLSearchParams(window.location.search);
+      const joinId = params.get("join");
+      if (joinId && view === VIEW.HOME && !isConnected) {
+          console.log("Found join ID in URL:", joinId);
+          setPeerIdInput(joinId);
+          // Auto join if we have an ID
+          // We need to call handleJoin, but handleJoin depends on state.
+          // We can't call it directly inside effect easily without dependencies.
+          // But we can trigger it via a flag or just call it if we extract the logic.
+          // For now, let's just pre-fill it.
+          // Actually, let's try to auto-click join or call the function.
+          // Since handleJoin is defined below, we can't call it here in strict ordering.
+          // Let's move this effect or use a ref to trigger join.
+      }
+  }, []); // Run once
+
   useEffect(() => {
     return () => {
       p2p?.destroy();
@@ -535,8 +553,11 @@ export function useGame() {
   };
 
   const copyId = () => {
-    navigator.clipboard.writeText(myId);
-    setError("ID 已复制到剪贴板"); 
+    // Copy the full URL with join param
+    const url = new URL(window.location.href);
+    url.searchParams.set("join", myId);
+    navigator.clipboard.writeText(url.toString());
+    setError("链接已复制到剪贴板"); 
     setTimeout(() => setError(null), 2000);
   };
 

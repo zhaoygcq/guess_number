@@ -1,4 +1,4 @@
-import { Settings, Copy, CheckCircle2, Users, X } from "lucide-react";
+import { Settings, Copy, CheckCircle2, Users, X, Share2 } from "lucide-react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
@@ -55,17 +55,22 @@ export const LobbyView = ({
           {/* Room ID Info */}
           {mode === GAME_MODE.MULTI_HOST && (
             <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-2">
-              <label className="text-xs font-semibold uppercase text-slate-500">房间 ID</label>
+              <label className="text-xs font-semibold uppercase text-slate-500">邀请好友</label>
               <div className="flex gap-2">
                 <Tooltip content={myId} className="flex-1 min-w-0">
-                    <code className="w-full block bg-black/20 p-2 rounded text-emerald-400 font-mono text-center select-all truncate">
-                    {myId || "生成中..."}
-                    </code>
+                    <div className="w-full bg-black/20 p-2 rounded flex items-center gap-2">
+                        <code className="flex-1 text-emerald-400 font-mono text-center select-all truncate">
+                            {myId || "生成中..."}
+                        </code>
+                    </div>
                 </Tooltip>
-                <Button variant="secondary" onClick={copyId} icon={Copy} className="px-3 shrink-0">
-                  复制
+                <Button variant="secondary" onClick={copyId} icon={Share2} className="px-3 shrink-0">
+                  分享链接
                 </Button>
               </div>
+              <p className="text-[10px] text-slate-500 text-center">
+                 发送链接给好友，点击即可加入房间
+              </p>
               {connectedCount > 0 ? (
                  <div className="space-y-1 mt-2">
                     <p className="text-xs text-emerald-400 flex items-center gap-1">

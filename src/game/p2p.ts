@@ -48,7 +48,30 @@ export class P2PManager {
   public myId: string = "";
 
   constructor() {
-    this.peer = new Peer();
+    const peerConfig: any = {
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        }
+    };
+
+    // Check for custom PeerServer config from env
+    const host = import.meta.env.VITE_PEER_HOST;
+    const port = import.meta.env.VITE_PEER_PORT;
+    const path = import.meta.env.VITE_PEER_PATH;
+    const secure = import.meta.env.VITE_PEER_SECURE;
+
+    if (host && port) {
+        console.log(`Using custom PeerServer: ${host}:${port}${path || "/"}`);
+        peerConfig.host = host;
+        peerConfig.port = Number(port);
+        peerConfig.path = path || "/";
+        peerConfig.secure = secure === "true";
+    }
+
+    this.peer = new Peer(peerConfig);
     
     this.peer.on("open", (id) => {
       this.myId = id;

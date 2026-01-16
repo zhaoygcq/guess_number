@@ -1,0 +1,13 @@
+{
+  "name": "guess-number-peer-server",
+  "version": "1.0.0",
+  "description": "PeerServer for Guess Number Game",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "build": "echo 'No build step required for PeerServer' && exit 0"
+  },
+  "dependencies": {
+    "peer": "^1.0.0"
+  }
+}
