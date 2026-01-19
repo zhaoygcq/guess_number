@@ -1,0 +1,18 @@
+services:
+  guess-number:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: guess-number-app
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    environment:
+      - NGINX_HOST=localhost
+      - NGINX_PORT=80
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
