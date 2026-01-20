@@ -27,7 +27,7 @@ docker-compose up -d --build
 docker build -t guess-number:latest .
 
 # 运行容器
-docker run -d -p 8080:80 --name guess-number-app guess-number:latest
+docker run -d -p 80:80 --name guess-number-app guess-number:latest
 
 # 查看日志
 docker logs -f guess-number-app

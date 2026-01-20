@@ -1,7 +1,0 @@
-name = "guess"
-compatibility_date = "2026-01-15"
-
-# 核心配置：绑定静态资源目录
-[assets]
-directory = "./dist" # 指向编译后的目录
-not_found_handling="single-page-application"
