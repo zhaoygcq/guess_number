@@ -12,15 +12,14 @@ COPY package.json pnpm-lock.yaml ./
 # 安装依赖
 RUN pnpm install
 
+# 👇 复制 .env 文件（Vite 会自动加载）
+COPY .env.production .env
+
 # 复制源代码
 COPY . .
 
-# 接受构建参数作为环境变量
-# 使用方式: docker build --build-arg VITE_RELAY_SERVER=wss://your-relay-server.com ...
-ARG VITE_RELAY_SERVER
-ENV VITE_RELAY_SERVER=${VITE_RELAY_SERVER}
-
 # 构建项目
+# 使用 VITE_RELAY_SERVER 环境变量进行构建
 RUN pnpm build
 
 # 运行阶段 - 使用 Nginx 提供静态文件

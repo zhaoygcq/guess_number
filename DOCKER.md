@@ -4,16 +4,24 @@
 
 ### 使用 Docker 命令
 
-#### 1. 构建镜像（带环境变量）
+#### 1. 构建镜像
 
+**方式 A: 使用默认值（推荐）**
 ```bash
-# 使用你的 Cloudflare Worker 地址
+# 使用 .env.production 中的 VITE_RELAY_SERVER 值
+# 或使用默认值: wss://guess-number-relay.1060401583.workers.dev
+docker build -t guess-number:latest .
+```
+
+**方式 B: 自定义 WebSocket 服务器地址**
+```bash
+# 使用指定的 WebSocket 服务器地址
 docker build \
-  --build-arg VITE_RELAY_SERVER=wss://guess-number-relay.1060401583.workers.dev \
+  --build-arg VITE_RELAY_SERVER=wss://your-relay-server.com \
   -t guess-number:latest .
 ```
 
-或者使用本地开发服务器：
+**方式 C: 使用本地开发服务器**
 ```bash
 docker build \
   --build-arg VITE_RELAY_SERVER=ws://localhost:8787 \
@@ -51,13 +59,12 @@ docker rmi guess-number:latest
 
 ### VITE_RELAY_SERVER
 
-这是构建时必须指定的环境变量，用于配置 WebSocket 中继服务器地址。
+这是 WebSocket 中继服务器地址，用于客户端连接。
 
-**必须在构建时指定：**
-
-```bash
-docker build --build-arg VITE_RELAY_SERVER=wss://your-relay-server.com ...
-```
+**构建时的优先级：**
+1. `--build-arg VITE_RELAY_SERVER=...`（最高优先级）
+2. `.env.production` 文件中的 `VITE_RELAY_SERVER`
+3. 默认值：`wss://guess-number-relay.1060401583.workers.dev`
 
 **常见值：**
 - Cloudflare Worker: `wss://guess-number-relay.1060401583.workers.dev`
