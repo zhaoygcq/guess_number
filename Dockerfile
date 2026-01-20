@@ -15,6 +15,11 @@ RUN pnpm install
 # 复制源代码
 COPY . .
 
+# 接受构建参数作为环境变量
+# 使用方式: docker build --build-arg VITE_RELAY_SERVER=wss://your-relay-server.com ...
+ARG VITE_RELAY_SERVER
+ENV VITE_RELAY_SERVER=${VITE_RELAY_SERVER}
+
 # 构建项目
 RUN pnpm build
 

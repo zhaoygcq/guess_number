@@ -2,60 +2,83 @@
 
 ## 构建和运行
 
-### 方法 1: 使用 Docker Compose (推荐)
+### 使用 Docker 命令
+
+#### 1. 构建镜像（带环境变量）
 
 ```bash
-# 构建并启动服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 停止服务
-docker-compose down
-
-# 重新构建并启动
-docker-compose up -d --build
+# 使用你的 Cloudflare Worker 地址
+docker build \
+  --build-arg VITE_RELAY_SERVER=wss://guess-number-relay.1060401583.workers.dev \
+  -t guess-number:latest .
 ```
 
-访问: http://localhost:8080
+或者使用本地开发服务器：
+```bash
+docker build \
+  --build-arg VITE_RELAY_SERVER=ws://localhost:8787 \
+  -t guess-number:latest .
+```
 
-### 方法 2: 使用 Docker 命令
+#### 2. 运行容器
 
 ```bash
-# 构建镜像
-docker build -t guess-number:latest .
+docker run -d -p 8080:80 --name guess-number-app guess-number:latest
+```
 
-# 运行容器
-docker run -d -p 80:80 --name guess-number-app guess-number:latest
+#### 3. 查看日志
 
-# 查看日志
+```bash
 docker logs -f guess-number-app
+```
 
+#### 4. 停止和清理
+
+```bash
 # 停止容器
 docker stop guess-number-app
 
 # 删除容器
 docker rm guess-number-app
+
+# 删除镜像（可选）
+docker rmi guess-number:latest
 ```
 
 访问: http://localhost:8080
 
 ## 环境变量
 
-如果需要自定义端口，可以修改 `docker-compose.yml` 中的 `ports` 配置：
+### VITE_RELAY_SERVER
 
-```yaml
-ports:
-  - "3000:80"  # 将宿主机的 3000 端口映射到容器的 80 端口
+这是构建时必须指定的环境变量，用于配置 WebSocket 中继服务器地址。
+
+**必须在构建时指定：**
+
+```bash
+docker build --build-arg VITE_RELAY_SERVER=wss://your-relay-server.com ...
 ```
+
+**常见值：**
+- Cloudflare Worker: `wss://guess-number-relay.1060401583.workers.dev`
+- 本地开发: `ws://localhost:8787`
+- 自建服务器: `wss://your-domain.com`
+
+### 自定义端口
+
+如果需要修改容器端口映射：
+
+```bash
+docker run -d -p 3000:80 --name guess-number-app guess-number:latest
+```
+
+访问: http://localhost:3000
 
 ## 文件结构
 
 ```
 .
 ├── Dockerfile              # Docker 构建文件
-├── docker-compose.yml      # Docker Compose 配置
 ├── nginx.conf              # Nginx 配置文件
 ├── .dockerignore           # Docker 忽略文件
 ├── DOCKER.md               # 本文件
